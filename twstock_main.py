@@ -1,5 +1,7 @@
-
+import sys
 import os
+sys.path.append(os.path.dirname(__file__))
+
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
@@ -22,7 +24,6 @@ def analyze_stock_triggers(now: datetime):
     label = slot_labels.get(now.hour, "🧪 測試推播")
     lines = [f"{label}\n"]
 
-    # 自訂追蹤清單
     stock_list = load_sheet_data()
     for stock in stock_list:
         code = stock["代碼"]
@@ -38,7 +39,7 @@ def analyze_stock_triggers(now: datetime):
         if reason:
             lines.append(f"推薦 {code}（{note or '無備註'}）→ {reason}")
 
-    # 中小型股推薦
+    # 中小型股推薦整合段落
     lines.append("\n📈 中小型股推薦：")
     for rec in get_recommend_stocks():
         lines.append(f"推薦 {rec['code']}（{rec['name']}）→ {rec['reason']}")
