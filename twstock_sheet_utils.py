@@ -1,37 +1,28 @@
-# twstock_sheet_utils.py
-
-import os
-import json
-import base64
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import os
+import json
 
-def load_google_sheets():
-    # 從 GitHub Secrets / .env 環境變數中讀取金鑰
-    key_json_base64 = os.getenv("GOOGLE_SHEET_KEY_JSON")
-    sheet_id = os.getenv("GOOGLE_SHEET_ID")
+def load_sheet_data():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    keyfile_dict = json.loads(os.getenv("GOOGLE_SHEET_KEY_JSON"))
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(keyfile_dict, scope)
+    client = gspread.authorize(creds)
 
-    if not key_json_base64 or not sheet_id:
-        raise Exception("缺少 GOOGLE_SHEET_KEY_JSON 或 GOOGLE_SHEET_ID 設定")
+    sheet = client.open_by_key(os.getenv("GOOGLE_SHEET_ID")).sheet1
+    rows = sheet.get_all_values()
+    stock_list = []
 
-    key_json_str = base64.b64decode(key_json_base64).decode('utf-8')
-    key_json = json.loads(key_json_str)
+    for row in rows[1:]:  # 跳過標題列
+        if not row or not row[0].strip():
+            continue
+        stock = {
+            "代碼": row[0].strip(),
+            "備註": row[1].strip() if len(row) > 1 else "",
+            "目標價": row[2].strip() if len(row) > 2 else "",
+            "提醒條件": row[3].strip() if len(row) > 3 else "",
+        }
+        stock_list.append(stock)
 
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    credentials = ServiceAccountCredentials.from_json_keyfile_dict(key_json, scope)
-    client = gspread.authorize(credentials)
+    return stock_list
 
-    sheet = client.open_by_key(sheet_id)
-    worksheet = sheet.get_worksheet(0)  # 讀取第一個工作表
-    return worksheet
-
-def get_watchlist():
-    worksheet = load_google_sheets()
-    data = worksheet.col_values(1)  # 讀取 A 欄（第 1 欄）
-    stock_ids = [d.strip() for d in data if d.strip().isdigit()]
-    return stock_ids
-
-if __name__ == "__main__":
-    # 測試用
-    watchlist = get_watchlist()
-    print("目前追蹤股票代碼：", watchlist)
