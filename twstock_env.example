@@ -1,0 +1,12 @@
+# twstock_env.example
+
+# 你的 LINE Bot 權杖
+LINE_CHANNEL_ACCESS_TOKEN=填入你的 LINE channel access token
+LINE_USER_ID=填入你自己的 LINE user ID（接收推播的人）
+
+# Google Sheets 金鑰（為了從你個人表單讀追蹤股票清單）
+# 請將 Google Service Account 金鑰 JSON 內容全部 base64 編碼後貼上（更安全）
+GOOGLE_SHEET_KEY_JSON=（base64 編碼後的 JSON 金鑰內容）
+
+# Google Sheet 文件 ID（網址中間那串）
+GOOGLE_SHEET_ID=你的 Google Sheet 文件 ID
