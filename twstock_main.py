@@ -1,8 +1,10 @@
+
 import os
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
 from twstock_sheet_utils import load_sheet_data
+from twstock_recommend import get_recommend_stocks
 
 load_dotenv()
 
@@ -20,6 +22,7 @@ def analyze_stock_triggers(now: datetime):
     label = slot_labels.get(now.hour, "🧪 測試推播")
     lines = [f"{label}\n"]
 
+    # 自訂追蹤清單
     stock_list = load_sheet_data()
     for stock in stock_list:
         code = stock["代碼"]
@@ -35,7 +38,12 @@ def analyze_stock_triggers(now: datetime):
         if reason:
             lines.append(f"推薦 {code}（{note or '無備註'}）→ {reason}")
 
-    return "\n".join(lines) if len(lines) > 1 else label + "（無符合條件資料）"
+    # 中小型股推薦
+    lines.append("\n📈 中小型股推薦：")
+    for rec in get_recommend_stocks():
+        lines.append(f"推薦 {rec['code']}（{rec['name']}）→ {rec['reason']}")
+
+    return "\n".join(lines)
 
 def send_line_notify(message: str):
     url = "https://api.line.me/v2/bot/message/push"
