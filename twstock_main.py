@@ -29,9 +29,7 @@ def analyze_stock_triggers(now: datetime):
 
         if "每日提醒" in condition:
             reason = "每日提醒"
-        elif "RSI" in condition:
-            reason = condition
-        elif "均線" in condition or "MACD" in condition:
+        elif "RSI" in condition or "均線" in condition or "MACD" in condition:
             reason = condition
 
         if reason:
