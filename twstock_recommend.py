@@ -1,4 +1,3 @@
-
 import requests
 
 def get_recommend_stocks(limit=5):
