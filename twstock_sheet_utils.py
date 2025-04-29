@@ -6,6 +6,11 @@ import json
 def load_sheet_data():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     keyfile_dict = json.loads(os.getenv("GOOGLE_SHEET_KEY_JSON"))
+
+    # 🔥 修正：自動還原 private_key 裡面的換行
+    if "private_key" in keyfile_dict:
+        keyfile_dict["private_key"] = keyfile_dict["private_key"].replace('\\\\n', '\\n')
+
     creds = ServiceAccountCredentials.from_json_keyfile_dict(keyfile_dict, scope)
     client = gspread.authorize(creds)
 
@@ -25,4 +30,3 @@ def load_sheet_data():
         stock_list.append(stock)
 
     return stock_list
-
