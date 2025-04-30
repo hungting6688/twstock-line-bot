@@ -1,6 +1,8 @@
+import os
+import json
 import gspread
 from google.oauth2.service_account import Credentials
-import json
+
 
 def load_sheet_data():
     with open("twstock-bot-c384c7951791.json") as f:
