@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from twstock_sheet_utils import load_sheet_data
 from twstock_recommend import get_recommend_stocks
-from twstock_tech_rank import get_tech_recommend
+from tech_rank import get_tech_recommend
 from twstock_macd import analyze_macd_signal
 
 load_dotenv()
