@@ -1,48 +1,28 @@
-# .github/workflows/twstock_scheduler.yml
-
-name: TWStock LINE 推播排程
+name: Run Stock Bot
 
 on:
   schedule:
-    # 注意：cron 時間是用「UTC 時間」寫的，台灣時間要 +8 小時換算！
-    # 下面設定的是台灣時間：
-    # 08:30 / 09:00 / 12:00 / 13:00 / 13:40
-    - cron: '30 0 * * 1-5'   # 08:30 台灣時間（UTC+0 是 00:30）
-    - cron: '0 1 * * 1-5'    # 09:00
-    - cron: '0 4 * * 1-5'    # 12:00
-    - cron: '0 5 * * 1-5'    # 13:00
-    - cron: '40 5 * * 1-5'   # 13:40
-    # 每週六早上 9:00 自動推播台股技術週報
-    - cron: '0 1 * * 6'
-
-  workflow_dispatch:        # 支援手動觸發（方便你隨時測試）
-  push:
-    paths:
-      - 'twstock_main.py'
-      - '.github/workflows/twstock_scheduler.yml'
+    - cron: '0 1 * * *'  # 每日台灣時間 09:00（UTC+0 要減 8 小時）
+    - cron: '0 2 * * *'  # 每日台灣時間 10:00
+    - cron: '0 4 * * *'  # 每日台灣時間 12:00
+    - cron: '15 5 * * *' # 每日台灣時間 13:15
+  workflow_dispatch:     # 手動執行也能觸發
 
 jobs:
-  run_twstock_push:
+  build:
     runs-on: ubuntu-latest
-    steps:
-      - name: 取得專案程式碼
-        uses: actions/checkout@v3
 
-      - name: 設定 Python 環境
-        uses: actions/setup-python@v4
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v2
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v2
         with:
           python-version: '3.10'
 
-      - name: 安裝套件
-        run: |
-          pip install -r ./twstock_requirements.txt
+      - name: 📦 Install dependencies
+        run: pip install -r requirements.txt
 
-
-      - name: 執行每日推播主程式
-        env:
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
-          GOOGLE_SHEET_KEY_JSON: ${{ secrets.GOOGLE_SHEET_KEY_JSON }}
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-        run: |
-          python3 twstock_main.py
+      - name: 🚀 Run Stock Bot
+        run: python3 twstock_main.py
