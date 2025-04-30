@@ -1,4 +1,3 @@
-
 import sys
 import os
 sys.path.append(os.path.dirname(__file__))
@@ -13,11 +12,13 @@ from twstock_macd import analyze_macd_signal
 
 load_dotenv()
 
+# ✅ 加入這行診斷 Secret 是否存在
+print("📢 GOOGLE_SHEET_KEY_JSON =", os.getenv("GOOGLE_SHEET_KEY_JSON"))
+
 LINE_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 USER_ID = os.getenv("LINE_USER_ID")
 
 def get_fake_rsi_dict():
-    # 如你已有 RSI 模組，可替換此函數
     return {
         "8046": 73,
         "2603": 72,
@@ -26,7 +27,6 @@ def get_fake_rsi_dict():
 
 def get_macd_recommend_list():
     rsi_dict = get_fake_rsi_dict()
-    # 範例熱門股，可替換為自動熱門股模組
     hot_stocks = ["8046", "2603", "2884"]
     macd_results = []
     for code in hot_stocks:
@@ -45,7 +45,6 @@ def analyze_stock_triggers(now: datetime):
     label = slot_labels.get(now.hour, "🧪 測試推播")
     lines = [f"{label}\n"]
 
-    # 自選清單條件分析
     stock_list = load_sheet_data()
     for stock in stock_list:
         code = stock["代碼"]
@@ -61,7 +60,6 @@ def analyze_stock_triggers(now: datetime):
         if reason:
             lines.append(f"推薦 {code}（{note or '無備註'}）→ {reason}")
 
-    # MACD 推薦區塊
     lines.append("\n📈 MACD 技術推薦：")
     macd_results = get_macd_recommend_list()
     if macd_results:
@@ -70,7 +68,6 @@ def analyze_stock_triggers(now: datetime):
     else:
         lines.append("（目前無符合 MACD 條件的股票）")
 
-    # 中小型股推薦
     lines.append("\n📉 中小型股推薦：")
     for rec in get_recommend_stocks():
         lines.append(f"推薦 {rec['code']}（{rec['name']}）→ {rec['reason']}")
