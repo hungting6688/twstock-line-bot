@@ -1,65 +1,48 @@
-import sys
-import os
-sys.path.append(os.path.dirname(__file__))
 
 import requests
-from dotenv import load_dotenv
-from datetime import datetime
-from twstock_sheet_utils import load_sheet_data
-from twstock_recommend import get_recommend_stocks
+import time
 
-load_dotenv()
+def get_hot_stocks(limit=200):
+    url = "https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX20"  # 市場熱門股成交排行
+    try:
+        res = requests.get(url, timeout=5)
+        data = res.json()
+    except:
+        return []
 
-LINE_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-USER_ID = os.getenv("LINE_USER_ID")
+    sorted_stocks = sorted(data, key=lambda x: int(x.get("成交金額", "0").replace(",", "") or 0), reverse=True)
+    result = []
+    for item in sorted_stocks[:limit]:
+        code = item["證券代號"]
+        if code.isdigit() and len(code) == 4:
+            result.append(code)
+    return result
 
-def analyze_stock_triggers(now: datetime):
-    slot_labels = {
-        8: "📊 撮合預測推播（08:30）",
-        9: "🚀 開盤強弱速報（09:00）",
-        12: "📈 中午技術異常整理（12:00）",
-        13: "📌 盤中轉折觀察（13:00）",
-        14: "📘 收盤完整分析（13:40）"
-    }
-    label = slot_labels.get(now.hour, "🧪 測試推播")
-    lines = [f"{label}\n"]
+def get_rsi(symbol):
+    try:
+        url = f"https://www.tej.com.tw/webtej/doc/uid/{symbol}"
+        res = requests.get(url, timeout=5)
+        if "RSI" in res.text:
+            import re
+            match = re.search(r"RSI\D+(\d{1,3}\.\d+)", res.text)
+            if match:
+                return float(match.group(1))
+    except:
+        pass
+    return None
 
-    stock_list = load_sheet_data()
-    for stock in stock_list:
-        code = stock["代碼"]
-        note = stock["備註"]
-        condition = stock["提醒條件"]
-        reason = ""
-
-        if "每日提醒" in condition:
-            reason = "每日提醒"
-        elif "RSI" in condition or "均線" in condition or "MACD" in condition:
-            reason = condition
-
-        if reason:
-            lines.append(f"推薦 {code}（{note or '無備註'}）→ {reason}")
-
-    # 中小型股推薦整合段落
-    lines.append("\n📈 中小型股推薦：")
-    for rec in get_recommend_stocks():
-        lines.append(f"推薦 {rec['code']}（{rec['name']}）→ {rec['reason']}")
-
-    return "\n".join(lines)
-
-def send_line_notify(message: str):
-    url = "https://api.line.me/v2/bot/message/push"
-    headers = {
-        "Authorization": f"Bearer {LINE_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "to": USER_ID,
-        "messages": [{"type": "text", "text": message}]
-    }
-    res = requests.post(url, headers=headers, json=payload)
-    print("LINE 推播結果:", res.status_code, res.text)
-
-if __name__ == "__main__":
-    now = datetime.now()
-    summary = analyze_stock_triggers(now)
-    send_line_notify(summary)
+def get_tech_recommend(limit=5):
+    hot_stocks = get_hot_stocks()
+    results = []
+    for code in hot_stocks:
+        rsi = get_rsi(code)
+        if rsi and rsi >= 70:
+            results.append({
+                "code": code,
+                "rsi": rsi,
+                "reason": f"RSI 達 {rsi}"
+            })
+        time.sleep(0.3)
+        if len(results) >= limit:
+            break
+    return results
