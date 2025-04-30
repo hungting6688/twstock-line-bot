@@ -2,11 +2,11 @@ name: Run Stock Bot
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # 每日台灣時間 09:00（UTC+0 要減 8 小時）
-    - cron: '0 2 * * *'  # 每日台灣時間 10:00
-    - cron: '0 4 * * *'  # 每日台灣時間 12:00
-    - cron: '15 5 * * *' # 每日台灣時間 13:15
-  workflow_dispatch:     # 手動執行也能觸發
+    - cron: '0 1 * * *'
+    - cron: '0 2 * * *'
+    - cron: '0 4 * * *'
+    - cron: '15 5 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -22,7 +22,8 @@ jobs:
           python-version: '3.10'
 
       - name: 📦 Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install gspread google-auth python-dotenv requests pandas
 
       - name: 🚀 Run Stock Bot
         run: python3 twstock_main.py
