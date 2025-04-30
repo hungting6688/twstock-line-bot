@@ -5,15 +5,15 @@ sys.path.append(os.path.dirname(__file__))
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
+import json
 from twstock_sheet_utils import load_sheet_data
 from twstock_recommend import get_recommend_stocks
 from tech_rank import get_tech_recommend
 from twstock_macd import analyze_macd_signal
 
+# ✅ 載入 .env 中的 Google Sheet 金鑰
 load_dotenv()
-
-# ✅ 加入這行診斷 Secret 是否存在
-print("📢 GOOGLE_SHEET_KEY_JSON =", os.getenv("GOOGLE_SHEET_KEY_JSON"))
+keyfile_dict = json.loads(os.getenv("GOOGLE_SHEET_KEY_JSON"))
 
 LINE_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 USER_ID = os.getenv("LINE_USER_ID")
