@@ -1,9 +1,12 @@
-def run():
-    print("🟣 [dividend] 高殖利率與 EPS 成長股分析")
-    picks = [
-        {"name": "2884 玉山金", "yield": "5.2%", "eps": "穩定"},
-        {"name": "1402 遠東新", "yield": "6.1%", "eps": "逐年成長"}
-    ]
-    print("💰 推薦標的：")
-    for p in picks:
-        print(f"💎 {p['name']}：殖利率 {p['yield']}，EPS {p['eps']}")
+from finmind_utils import get_top_dividend_stocks
+
+def run_dividend():
+    top_dividends = get_top_dividend_stocks(limit=5)
+
+    if not top_dividends:
+        return "💰 今日無公告或預估殖利率較高的個股。"
+
+    message = "💰 高殖利率觀察：\n"
+    for stock_id, percent in top_dividends:
+        message += f"- {stock_id}：預估殖利率 {percent}%\n"
+    return message
