@@ -110,9 +110,8 @@ def analyze_stocks_with_signals(title="📊 推薦股報告", limit=100):
         except Exception as e:
             print(f"❌ 處理 {sid} 失敗：{e}")
 
-    if not results:
-        return f"{title}
-今日無符合條件的推薦股。"
+       if not results:
+        return f"{title}\n今日無符合條件的推薦股。"
 
     sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
     lines = [f"{title}"]
