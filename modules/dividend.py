@@ -1,12 +1,19 @@
-from finmind_utils import get_top_dividend_stocks
+from datetime import date
+from finmind_utils import fetch_finmind_data
 
-def run_dividend():
-    top_dividends = get_top_dividend_stocks(limit=5)
-
-    if not top_dividends:
-        return "💰 今日無公告或預估殖利率較高的個股。"
-
-    message = "💰 高殖利率觀察：\n"
-    for stock_id, percent in top_dividends:
-        message += f"- {stock_id}：預估殖利率 {percent}%\n"
-    return message
+def analyze_dividend(stock_id="2330"):
+    today = date.today().strftime("%Y-%m-%d")
+    df = fetch_finmind_data(
+        dataset="TaiwanStockDividend",
+        params={"stock_id": stock_id, "date": today}
+    )
+    if df.empty:
+        return f"無法取得 {stock_id} 的殖利率資訊"
+    
+    latest = df.iloc[-1]
+    return (
+        f"【殖利率】{stock_id}\n"
+        f"股利年度：{latest['year']}\n"
+        f"現金股利：{latest['cash_dividend']}\n"
+        f"殖利率：約 {latest.get('dividend_yield', '未知')}%\n"
+    )
