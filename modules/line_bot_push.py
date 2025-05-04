@@ -2,9 +2,9 @@ import os
 import requests
 
 def send_line_bot_message(message: str, user_id: str = None):
-    access_token = os.getenv("LINE_CHANNEL_TOKEN")
+    access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
     if not access_token:
-        raise ValueError("❌ 尚未設定 LINE_CHANNEL_TOKEN")
+        raise ValueError("❌ 尚未設定 LINE_CHANNEL_ACCESS_TOKEN")
 
     user_id = user_id or os.getenv("LINE_USER_ID")
     if not user_id:
