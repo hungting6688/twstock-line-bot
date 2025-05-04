@@ -1,65 +1,65 @@
-import requests
 import os
-from datetime import datetime, timedelta
+import requests
+from datetime import date
 
-FINMIND_TOKEN = os.getenv("FINMIND_TOKEN")
+FINMIND_API = "https://api.finmindtrade.com/api/v4/data"
+TOKEN = os.getenv("FINMIND_TOKEN")
 
-def get_today_date():
-    return datetime.today().strftime("%Y-%m-%d")
+# ✅ 基本請求格式
+def fetch_data(dataset, **kwargs):
+    payload = {
+        "dataset": dataset,
+        "token": TOKEN,
+        **kwargs
+    }
+    response = requests.get(FINMIND_API, params=payload)
+    data = response.json()
+    if not data.get("data"):
+        return []
+    return data["data"]
 
+# ✅ 1️⃣ 取得熱門成交前 100 名股票（模擬，待你有完整來源後接替）
+def get_top_100_stocks():
+    # TODO: 可改抓成交金額最大前百大
+    return ["2330", "2317", "2454", "2603", "2303", "2884", "2308", "1101", "8046", "2609"][:100]
+
+# ✅ 2️⃣ 取得殖利率高的股票
 def get_top_dividend_stocks(limit=5):
-    url = "https://api.finmindtrade.com/api/v4/data"
-    payload = {
-        "dataset": "TaiwanStockDividend",
-        "data_id": "",
-        "start_date": "2024-01-01",
-        "token": FINMIND_TOKEN
-    }
-    r = requests.get(url, params=payload)
-    data = r.json()["data"]
+    today = str(date.today())
+    data = fetch_data("TaiwanStockDividendYield", date=today)
+    sorted_data = sorted(data, key=lambda x: x.get("DividendYield", 0), reverse=True)
+    return [(d["stock_id"], round(d["DividendYield"], 2)) for d in sorted_data[:limit]]
 
-    latest = sorted(data, key=lambda x: x.get("cash_dividend", 0), reverse=True)
-    result = [(d["stock_id"], round(d.get("cash_dividend", 0), 2)) for d in latest if d.get("cash_dividend", 0) > 0]
-    return result[:limit]
-
+# ✅ 3️⃣ 偵測異常放量個股（可根據 Volume 成交量判斷）
 def get_intraday_breakout_stocks(limit=5):
-    # 模擬方法：找前日成交量大增股票（未來可替換為即時價量異常判斷）
-    url = "https://api.finmindtrade.com/api/v4/data"
-    yesterday = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-    payload = {
-        "dataset": "TaiwanStockPrice",
-        "start_date": yesterday,
-        "token": FINMIND_TOKEN
-    }
-    r = requests.get(url, params=payload)
-    data = r.json()["data"]
+    top_stocks = get_top_100_stocks()
+    result = []
+    for sid in top_stocks:
+        try:
+            data = fetch_data("TaiwanStockPrice", stock_id=sid, start_date=str(date.today()))
+            if not data or len(data) < 2:
+                continue
+            latest = data[-1]
+            if latest["Trading_Volume"] > 5000:  # 門檻可自訂
+                result.append((sid, "今日爆量放大，短線走勢轉強"))
+            if len(result) >= limit:
+                break
+        except:
+            continue
+    return result
 
-    # 找出近一天成交量前幾高個股
-    volume_ranking = {}
-    for item in data:
-        stock_id = item["stock_id"]
-        volume_ranking.setdefault(stock_id, 0)
-        volume_ranking[stock_id] += item["Trading_Volume"]
-
-    sorted_volume = sorted(volume_ranking.items(), key=lambda x: x[1], reverse=True)
-    return [(stock_id, "成交量異常放大") for stock_id, _ in sorted_volume[:limit]]
-
+# ✅ 4️⃣ 收盤推薦股篩選（模擬條件：法人買超 + 上漲）
 def get_closing_recommendations(limit=5):
-    # 模擬綜合：法人買超、量能、技術整合（可替換為複合評分模型）
-    url = "https://api.finmindtrade.com/api/v4/data"
-    payload = {
-        "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
-        "start_date": get_today_date(),
-        "token": FINMIND_TOKEN
-    }
-    r = requests.get(url, params=payload)
-    data = r.json()["data"]
+    top_stocks = get_top_100_stocks()
+    recommendations = []
 
-    net_buy = {}
-    for d in data:
-        sid = d["stock_id"]
-        net_buy.setdefault(sid, 0)
-        net_buy[sid] += d["buy"] - d["sell"]
-
-    top_picks = sorted(net_buy.items(), key=lambda x: x[1], reverse=True)
-    return [(sid, "法人買超強勁，表現可期") for sid, val in top_picks[:limit]]
+    for sid in top_stocks:
+        data = fetch_data("TaiwanStockInstitutionalInvestors", stock_id=sid, start_date=str(date.today()))
+        if not data:
+            continue
+        net_buy = sum(d["buy"] - d["sell"] for d in data)
+        if net_buy > 500:  # 可自訂門檻
+            recommendations.append((sid, "法人買超明顯，短線趨勢偏多"))
+        if len(recommendations) >= limit:
+            break
+    return recommendations
