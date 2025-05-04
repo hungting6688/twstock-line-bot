@@ -2,10 +2,27 @@ import os
 import json
 import pandas as pd
 import gspread
-from datetime import date
+from datetime import datetime, timedelta
 from modules.finmind_utils import fetch_finmind_data
 
-# ✅ 嘗試讀取 Google Sheets 自選股
+# ✅ 自動避開假日、早上未收盤的情況
+def get_latest_valid_trading_date() -> str:
+    today = datetime.today()
+
+    if today.weekday() == 5:  # Saturday
+        today -= timedelta(days=1)
+    elif today.weekday() == 6:  # Sunday
+        today -= timedelta(days=2)
+    elif today.weekday() < 5 and today.hour < 15:  # 平日早盤前
+        today -= timedelta(days=1)
+        if today.weekday() == 6:
+            today -= timedelta(days=2)
+        elif today.weekday() == 5:
+            today -= timedelta(days=1)
+
+    return today.strftime("%Y-%m-%d")
+
+# ✅ Google Sheets 額外追蹤股（加上防呆）
 def get_tracking_stock_ids(sheet_key="你的 SHEET KEY", column_index=1) -> list:
     try:
         google_key_json_str = os.getenv("GOOGLE_JSON_KEY")
@@ -36,60 +53,18 @@ def compute_kd(df, period=9):
     d = k.ewm(com=2).mean()
     return k, d
 
-# ✅ 技術指標分析邏輯（供兩組股票共用）
+# ✅ 技術指標分析（共用邏輯）
 def analyze_stock_list(stock_ids):
-    today = date.today().strftime("%Y-%m-%d")
+    today_str = get_latest_valid_trading_date()
     messages = []
 
     for stock_id in stock_ids:
         df = fetch_finmind_data(
             dataset="TaiwanStockPrice",
-            params={"stock_id": stock_id, "start_date": "2024-01-01", "end_date": today}
+            params={"stock_id": stock_id, "start_date": "2024-01-01", "end_date": today_str}
         )
         if df.empty or len(df) < 30:
+            print(f"⚠️ FinMind 無資料：{stock_id}")
             continue
 
-        df["RSI"] = compute_rsi(df["close"])
-        df["MA5"] = df["close"].rolling(5).mean()
-        df["MA20"] = df["close"].rolling(20).mean()
-        df["K"], df["D"] = compute_kd(df)
-        latest = df.iloc[-1]
-
-        signal_list = []
-
-        if latest["RSI"] > 70:
-            signal_list.append("🔺RSI > 70：短線過熱")
-        elif latest["RSI"] < 30:
-            signal_list.append("🟢RSI < 30：超跌反彈機會")
-
-        if latest["MA5"] > latest["MA20"]:
-            signal_list.append("🟢5日均線高於20日，短期偏多")
-        else:
-            signal_list.append("🔻短期均線跌破，觀望為主")
-
-        if latest["K"] > latest["D"] and df["K"].iloc[-2] < df["D"].iloc[-2]:
-            signal_list.append("🟢KD 黃金交叉出現")
-
-        if signal_list:
-            messages.append(f"【{stock_id}】\n" + "\n".join(signal_list))
-
-    return messages
-
-# 🟢 主程式：合併分析與 LINE 推播用訊息產生
-def analyze_opening():
-    # 🔍 自動分析熱門股（預設：前200名或內建邏輯）
-    hot_stock_ids = ["2603", "3231", "1513", "3707", "2303"]  # ← 你可以改為自動讀取熱門股邏輯
-    hot_signals = analyze_stock_list(hot_stock_ids)
-
-    # 📥 額外追蹤股來自 Google Sheets
-    sheet_stock_ids = get_tracking_stock_ids(sheet_key="你的 SHEET KEY")
-    sheet_signals = analyze_stock_list(sheet_stock_ids) if sheet_stock_ids else []
-
-    # 📬 合併訊息
-    final_msgs = []
-    if hot_signals:
-        final_msgs.append("📊 系統推薦：\n" + "\n\n".join(hot_signals))
-    if sheet_signals:
-        final_msgs.append("📝 額外追蹤：\n" + "\n\n".join(sheet_signals))
-
-    return "\n\n".join(final_msgs) if final_msgs else "✅ 今日無明顯技術推薦股"
+        df["RSI"] =
