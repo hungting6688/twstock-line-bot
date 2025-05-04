@@ -3,7 +3,8 @@ from modules.run_opening import analyze_opening
 from modules.intraday_monitor import intraday_check
 from modules.dividend import analyze_dividend
 from modules.closing_summary import analyze_technical
-from line_notify import send_line_notify  # 假設你已有此函式
+from modules.line_notify import send_line_notify
+
 
 def main(mode):
     if mode == "opening":
