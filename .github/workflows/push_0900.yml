@@ -1,0 +1,23 @@
+
+---
+
+## ✅ 3️⃣ `push_0900.yml`（放在 `.github/workflows/`）
+
+```yaml
+name: push_0900
+on:
+  schedule:
+    - cron: '0 1 * * *'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run push script
+        run: python3 main.py --time 0900
