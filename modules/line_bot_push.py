@@ -6,10 +6,9 @@ def send_line_bot_message(message: str, user_id: str = None):
     if not access_token:
         raise ValueError("❌ 尚未設定 LINE_CHANNEL_TOKEN")
 
-    # 預設對象（可寫死或從 Secrets 提供）
     user_id = user_id or os.getenv("LINE_USER_ID")
     if not user_id:
-        raise ValueError("❌ 尚未設定 LINE_USER_ID（接收訊息的用戶 ID）")
+        raise ValueError("❌ 尚未設定 LINE_USER_ID（接收者 LINE ID）")
 
     url = "https://api.line.me/v2/bot/message/push"
     headers = {
@@ -21,8 +20,11 @@ def send_line_bot_message(message: str, user_id: str = None):
         "messages": [{"type": "text", "text": message}]
     }
 
-    res = requests.post(url, headers=headers, json=payload)
-    if res.status_code != 200:
-        print(f"❌ 推播失敗：{res.status_code} {res.text}")
-    else:
-        print("✅ LINE Bot 推播成功")
+    try:
+        res = requests.post(url, headers=headers, json=payload)
+        if res.status_code != 200:
+            print(f"❌ LINE Bot 推播失敗：{res.status_code} {res.text}")
+        else:
+            print("✅ LINE Bot 推播成功")
+    except Exception as e:
+        print(f"❌ 傳送訊息時發生錯誤：{e}")
