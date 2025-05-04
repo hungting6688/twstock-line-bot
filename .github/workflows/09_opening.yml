@@ -2,12 +2,18 @@ name: 開盤推薦（09:00）
 
 on:
   schedule:
-    - cron: '0 1 * * 1-5'  # 台灣09:00 = UTC+8 → UTC 01:00
+    - cron: '0 1 * * 1-5'
   workflow_dispatch:
 
 jobs:
   run-opening:
     runs-on: ubuntu-latest
+    env:
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+      GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+      LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -17,8 +23,4 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run Opening Analysis
-        env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-          GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
-          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
         run: python main.py --mode=opening
