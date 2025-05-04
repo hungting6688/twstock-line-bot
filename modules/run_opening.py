@@ -5,22 +5,27 @@ import gspread
 from datetime import datetime, timedelta
 from modules.finmind_utils import fetch_finmind_data
 
-# ✅ 自動避開假日與早盤資料不全
+# ✅ 自動避開假日、早盤未更新、延遲等問題
 def get_latest_valid_trading_date() -> str:
     today = datetime.today()
-    if today.weekday() == 5:
+
+    if today.weekday() == 5:  # Saturday
         today -= timedelta(days=1)
-    elif today.weekday() == 6:
+    elif today.weekday() == 6:  # Sunday
         today -= timedelta(days=2)
-    elif today.weekday() < 5 and today.hour < 15:
+    elif today.weekday() < 5 and today.hour < 15:  # 平日早盤
         today -= timedelta(days=1)
         if today.weekday() == 6:
             today -= timedelta(days=2)
         elif today.weekday() == 5:
             today -= timedelta(days=1)
+
+    # 📌 加一層保險 → 再往前退一天，避開資料延遲
+    today -= timedelta(days=1)
+
     return today.strftime("%Y-%m-%d")
 
-# ✅ 從 Google Sheets 讀取使用者追蹤股（自動讀取 Secrets 中的 SHEET ID）
+# ✅ 從 Google Sheets 讀追蹤股（ID 來自 GitHub Secrets）
 def get_tracking_stock_ids(sheet_key, column_index=1) -> list:
     try:
         google_key_json_str = os.getenv("GOOGLE_JSON_KEY")
@@ -34,7 +39,7 @@ def get_tracking_stock_ids(sheet_key, column_index=1) -> list:
         print(f"⚠️ 無法讀取 Google Sheets：{e}")
         return []
 
-# 📊 RSI 指標計算
+# 📊 RSI 計算
 def compute_rsi(close_prices, period=14):
     delta = close_prices.diff()
     gain = delta.where(delta > 0, 0).rolling(window=period).mean()
@@ -42,7 +47,7 @@ def compute_rsi(close_prices, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# 📊 KD 指標計算
+# 📊 KD 計算
 def compute_kd(df, period=9):
     low_min = df["low"].rolling(window=period).min()
     high_max = df["high"].rolling(window=period).max()
@@ -51,7 +56,7 @@ def compute_kd(df, period=9):
     d = k.ewm(com=2).mean()
     return k, d
 
-# 🔍 分析一組股票清單（系統股或自選股都可）
+# 🔍 技術分析邏輯（系統股與自選股通用）
 def analyze_stock_list(stock_ids):
     today_str = get_latest_valid_trading_date()
     messages = []
@@ -91,20 +96,21 @@ def analyze_stock_list(stock_ids):
 
     return messages
 
-# 🟢 主流程：合併系統推薦與使用者追蹤股
+# 🟢 主程式：合併系統熱門股 + 使用者追蹤股
 def analyze_opening():
-    # ✅ 系統內建熱門股（未來可改為自動抓熱門前200）
+    # ✅ 系統推薦熱門股（可未來替換為自動選股邏輯）
     hot_stock_ids = ["2603", "3231", "1513", "3707", "2303"]
     hot_signals = analyze_stock_list(hot_stock_ids)
 
-    # ✅ 讀取使用者追蹤股（從 Secrets 讀 SHEET ID）
-    sheet_key = os.getenv("GOOGLE_SHEET_ID")
+    # ✅ Google Sheets 額外追蹤股
     sheet_signals = []
+    sheet_key = os.getenv("GOOGLE_SHEET_ID")
     if sheet_key:
         sheet_stock_ids = get_tracking_stock_ids(sheet_key=sheet_key)
-        sheet_signals = analyze_stock_list(sheet_stock_ids) if sheet_stock_ids else []
+        if sheet_stock_ids:
+            sheet_signals = analyze_stock_list(sheet_stock_ids)
 
-    # 📨 組合訊息
+    # 📬 整合推播訊息
     final_msgs = []
     if hot_signals:
         final_msgs.append("📊 系統推薦：\n" + "\n\n".join(hot_signals))
