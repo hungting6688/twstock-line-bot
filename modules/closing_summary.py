@@ -1,5 +1,5 @@
 from datetime import date
-from finmind_utils import fetch_finmind_data
+from modules.finmind_utils import fetch_finmind_data
 
 def analyze_technical(stock_id="2330"):
     today = date.today().strftime("%Y-%m-%d")
