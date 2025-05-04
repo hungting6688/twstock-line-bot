@@ -1,0 +1,24 @@
+name: 盤中監控（10:30）
+
+on:
+  schedule:
+    - cron: '30 2 * * 1-5'  # 台灣10:30 = UTC+8 → UTC 02:30
+  workflow_dispatch:
+
+jobs:
+  run-intraday:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Intraday Monitor
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
+          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
+        run: python main.py --mode=intraday
