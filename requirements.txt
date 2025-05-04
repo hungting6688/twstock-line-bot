@@ -1,0 +1,14 @@
+# LINE Bot SDK
+line-bot-sdk
+
+# 資料處理與指標
+pandas
+requests
+python-dotenv
+
+# Google Sheets API
+gspread
+google-auth
+
+# 若日後要畫圖也可先裝好
+matplotlib

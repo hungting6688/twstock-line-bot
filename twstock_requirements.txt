@@ -1,6 +1,0 @@
-gspread
-google-auth
-python-dotenv
-requests
-pandas
-line-bot-sdk
