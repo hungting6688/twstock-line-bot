@@ -3,7 +3,7 @@ from modules.run_opening import analyze_opening
 from modules.intraday_monitor import intraday_check
 from modules.dividend import analyze_dividend
 from modules.closing_summary import analyze_technical
-from modules.line_bot_push import send_line_bot_message  # ✅ 新推播模組
+from modules.line_bot_push import send_line_bot_message  # ✅ 新的推播模組
 
 def main(mode):
     try:
@@ -32,7 +32,7 @@ def main(mode):
     except Exception as e:
         msg = f"❌ 執行 {mode} 發生錯誤：{e}"
 
-    # ✅ 使用 LINE Bot 發送
+    # ✅ 改用 LINE Bot 推播
     send_line_bot_message(msg)
 
 if __name__ == "__main__":
