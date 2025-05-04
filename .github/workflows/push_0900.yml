@@ -20,5 +20,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run push script
-        run: python3 main.py --time 0900
+     - name: Run push script
+  run: python3 ./twstock-line-bot/main.py --time 0900
+
