@@ -1,6 +1,12 @@
-def run():
-    print("🟡 [intraday_monitor] 盤中跳空異常追蹤中...")
-    abnormal = ["2609 陽明", "6182 合晶"]
-    print("📊 盤中異常股：")
-    for stock in abnormal:
-        print(f"⚠️ {stock}：爆量急拉，建議密切觀察")
+from finmind_utils import get_intraday_breakout_stocks
+
+def run_intraday():
+    breakout_list = get_intraday_breakout_stocks(limit=5)
+
+    if not breakout_list:
+        return "📊 即時監控：目前未偵測到異常放量或技術轉強的個股。"
+
+    message = "📊 即時技術觀察推薦：\n"
+    for stock_id, reason in breakout_list:
+        message += f"- {stock_id}：{reason}\n"
+    return message
