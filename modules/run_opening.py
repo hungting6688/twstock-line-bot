@@ -3,7 +3,8 @@ import json
 import pandas as pd
 import gspread
 from datetime import date
-from finmind_utils import fetch_finmind_data
+from modules.finmind_utils import fetch_finmind_data
+
 
 # ✅ 從 GitHub Secrets 讀取 Google Sheets 金鑰並登入
 def get_tracking_stock_ids(sheet_name="追蹤清單", column_index=1) -> list:
