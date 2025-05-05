@@ -5,23 +5,24 @@ import datetime
 import pytz
 import gspread
 import json
+import requests
 from oauth2client.service_account import ServiceAccountCredentials
 
-# ========== ✅ 取得最近有效交易日（含保險機制） ==========
+# ✅ 取得最近有效交易日
 def get_latest_valid_trading_date():
     tz = pytz.timezone("Asia/Taipei")
     now = datetime.datetime.now(tz)
     today = now.date()
 
     if now.hour < 15:
-        today -= datetime.timedelta(days=1)  # 收盤前回推一天
+        today -= datetime.timedelta(days=1)
 
-    while today.weekday() >= 5:  # 週六、週日跳過
+    while today.weekday() >= 5:
         today -= datetime.timedelta(days=1)
 
     return today.strftime("%Y-%m-%d")
 
-# ========== ✅ 從 Google Sheets 讀取股票代碼 ==========
+# ✅ 從 Google Sheet 擷取額外股票代碼
 def get_google_sheet_stock_ids():
     try:
         sheet_key = os.environ.get("GOOGLE_SHEET_ID")
@@ -41,27 +42,39 @@ def get_google_sheet_stock_ids():
         print(f"⚠️ 無法讀取 Google Sheets：{e}")
         return []
 
-# ========== ✅ 取得熱門前 N 大股票（預設固定列表） ==========
-def get_hot_stock_ids(limit=100, filter_type="all"):
-    popular_ids = [
-        "2330", "2317", "2303", "2603", "3711", "2881", "2454", "2609", "3231",
-        "1513", "3707", "8046", "3034", "1101", "1301", "2002", "2882", "2891",
-        "2409", "2615", "6147", "8261", "3045", "2344", "4919", "2605", "2408"
-    ]
-    small_caps = ["8046", "3231", "6147", "3707", "2344", "8261", "4919"]
-    large_caps = ["2330", "2317", "2303", "2454", "2881", "2882", "2603", "1101", "1301"]
+# ✅ 自動爬取所有上市櫃股票（含 ETF）
+def get_all_stock_ids(limit=9999, filter_type="all"):
+    try:
+        url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
+        response.encoding = "big5"
+        lines = response.text.split("\n")
+        stock_ids = []
 
-    base = (popular_ids * ((limit // len(popular_ids)) + 1))[:limit]
+        for line in lines:
+            if "上市" in line and "股票" in line:
+                parts = line.split("\t")
+                if len(parts) > 1:
+                    code_name = parts[0].strip()
+                    if code_name and code_name[:4].isdigit():
+                        stock_id = code_name[:4]
+                        stock_ids.append(stock_id)
 
-    if filter_type == "small_cap":
-        base = [sid for sid in base if sid in small_caps]
-    elif filter_type == "large_cap":
-        base = [sid for sid in base if sid in large_caps]
+        # 選擇性過濾（目前保留 ETF）
+        # 篩選類型
+        if filter_type == "small_cap":
+            stock_ids = [sid for sid in stock_ids if sid.startswith(("3", "4", "6"))]
+        elif filter_type == "large_cap":
+            stock_ids = [sid for sid in stock_ids if sid.startswith(("1", "2"))]
 
-    # 合併 Google Sheet 額外追蹤股
-    sheet_ids = get_google_sheet_stock_ids()
-    for sid in sheet_ids:
-        if sid not in base:
-            base.append(sid)
+        # 加入 Google Sheet 額外追蹤股
+        sheet_ids = get_google_sheet_stock_ids()
+        for sid in sheet_ids:
+            if sid not in stock_ids:
+                stock_ids.append(sid)
 
-    return base[:limit]
+        return stock_ids[:limit]
+    except Exception as e:
+        print(f"⚠️ 抓取股票代碼失敗：{e}")
+        return []
