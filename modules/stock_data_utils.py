@@ -1,49 +1,53 @@
-import datetime
+import os
 import requests
 import pandas as pd
-import gspread
-import os
-import json
-from oauth2client.service_account import ServiceAccountCredentials
+import random
+from datetime import datetime, timedelta
+from modules.twse_scraper import get_all_valid_twse_stocks
+
 
 def get_latest_valid_trading_date():
-    today = datetime.date.today()
-    delta = datetime.timedelta(days=1)
-    for i in range(7):  # 最多往前找一週
-        date = today - delta * i
-        if date.weekday() < 5:  # 0=Monday, 6=Sunday
-            return date.strftime("%Y-%m-%d")
+    today = datetime.today()
+    delta = timedelta(days=1)
+    for _ in range(7):  # 最多往前找七天
+        if today.weekday() < 5:  # 0~4 為週一到週五
+            return today.strftime("%Y-%m-%d")
+        today -= delta
     return today.strftime("%Y-%m-%d")
 
-def get_all_stock_ids(limit=100, filter_type="all", include_etf=True):
-    from modules.twse_scraper import get_all_valid_twse_stocks
 
+def get_all_stock_ids(limit=100, filter_type="all"):
     all_stocks = get_all_valid_twse_stocks()
-    if not include_etf:
-        all_stocks = all_stocks[~all_stocks["證券名稱"].str.contains("ETF")]
 
+    # 篩選條件：排除已下市、保留 ETF
+    all_stocks = [s for s in all_stocks if s["is_valid"] and (s["type"] in ["stock", "etf"])]
+
+    # 進一步分類
     if filter_type == "large_cap":
-        stocks = all_stocks.head(limit)
+        filtered = [s for s in all_stocks if s["market"] == "上市" and s["industry_category"] not in ["ETF", "受益證券"]]
     elif filter_type == "small_cap":
-        stocks = all_stocks.tail(limit)
+        filtered = [s for s in all_stocks if s["market"] == "上櫃" and s["industry_category"] not in ["ETF", "受益證券"]]
     else:
-        stocks = all_stocks.sample(n=limit, random_state=42) if limit else all_stocks
+        filtered = all_stocks
 
-    return stocks["證券代號"].tolist()
+    # 隨機選取 limit 檔（若有設定）
+    stocks = random.sample(filtered, k=limit) if limit else filtered
+    return [s["stock_id"] for s in stocks]
 
-def get_tracking_stock_ids(sheet_name="追蹤清單", col=1):
-    """
-    從 Google Sheets 讀取 A 欄的自選追蹤股票代碼，排除第一列標題。
-    """
-    json_key = json.loads(os.environ["GOOGLE_JSON_KEY"])
+
+def get_tracking_stock_ids():
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    import json
+
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    json_key = json.loads(os.environ["GOOGLE_JSON_KEY"])
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(json_key, scope)
     gc = gspread.authorize(credentials)
-    
+
     sheet_id = os.environ.get("GOOGLE_SHEET_ID")
     sh = gc.open_by_key(sheet_id)
-    worksheet = sh.worksheet(sheet_name)
+    worksheet = sh.get_worksheet(0)  # 第一個工作表
 
-    stock_ids = worksheet.col_values(col)[1:]  # 跳過第一列標題
-    stock_ids = [s.strip() for s in stock_ids if s.strip() != ""]
-    return stock_ids
+    data = worksheet.col_values(1)  # 讀取第一欄
+    return [stock_id.strip() for stock_id in data[1:] if stock_id.strip()]  # 排除標題與空白
