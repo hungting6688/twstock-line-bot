@@ -1,28 +1,27 @@
 import argparse
-from modules.line_bot_push import send_line_bot_message
-from modules.run_opening import analyze_run_opening
-from modules.intraday_monitor import analyze_intraday_monitor
+from modules.run_opening import analyze_opening
+from modules.intraday_monitor import analyze_intraday
 from modules.dividend import analyze_dividend
-from modules.closing_summary import analyze_closing_summary
+from modules.closing_summary import analyze_closing
+from modules.line_bot_push import send_line_bot_message
 
-def main(mode: str):
+def main(mode):
     print(f"📌 分析模式：{mode}")
-    
     if mode == "opening":
-        msg = analyze_run_opening()
+        msg = analyze_opening()
     elif mode == "intraday":
-        msg = analyze_intraday_monitor()
+        msg = analyze_intraday()
     elif mode == "dividend":
         msg = analyze_dividend()
     elif mode == "closing":
-        msg = analyze_closing_summary()
+        msg = analyze_closing()
     else:
-        msg = "❌ 錯誤：未知的分析模式，請使用 opening / intraday / dividend / closing 其中之一。"
-    
+        raise ValueError("❌ 無效的模式參數，請使用 opening / intraday / dividend / closing")
+
     send_line_bot_message(msg)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, required=True, help="選擇分析模式")
+    parser.add_argument("--mode", type=str, required=True, help="模式選項：opening, intraday, dividend, closing")
     args = parser.parse_args()
     main(args.mode)
