@@ -1,5 +1,3 @@
-# main.py
-
 import argparse
 from modules.run_opening import analyze_opening
 from modules.intraday_monitor import analyze_intraday
@@ -19,12 +17,12 @@ def main(mode):
     elif mode == "closing":
         msg = analyze_closing()
     else:
-        raise ValueError("❌ 無效模式，請使用 --mode=[opening|intraday|dividend|closing]")
+        raise ValueError("❌ 不支援的模式，請使用 opening / intraday / dividend / closing")
 
     send_line_bot_message(msg)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, required=True)
+    parser.add_argument("--mode", required=True, help="分析模式：opening / intraday / dividend / closing")
     args = parser.parse_args()
     main(args.mode)
