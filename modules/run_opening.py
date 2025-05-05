@@ -1,15 +1,10 @@
 from modules.signal_analysis import analyze_stocks_with_signals
-from modules.stock_data_utils import get_latest_valid_trading_date
 
-def analyze_opening():
-    print("📌 分析模式：opening")
-    title = "📊 開盤推薦股報告"
-
+def analyze_run_opening():
     return analyze_stocks_with_signals(
-        title=title,
-        min_score=2.0,
+        title="📌 開盤推薦股報告",
         limit=100,
+        min_score=2.0,
         filter_type="all",
-        include_weak=True,
-        date=get_latest_valid_trading_date()
+        include_weak=True
     )
