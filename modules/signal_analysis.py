@@ -1,75 +1,118 @@
-from modules.finmind_utils import fetch_finmind_data, get_hot_stock_ids, get_latest_valid_trading_date
-import pandas as pd
+import os
+from datetime import datetime, timedelta
+from finmind_utils import (
+    get_latest_valid_trading_date,
+    fetch_stock_technical_data,
+    get_hot_stock_ids
+)
 
-# 技術指標與權重設定
-TECH_SIGNAL_RULES = {
-    "RSI_low": {"weight": 1.5, "condition": lambda x: x.get("rsi_6", 50) < 30, "text": "🟢 RSI < 30（超跌反彈）"},
-    "RSI_high": {"weight": -1, "condition": lambda x: x.get("rsi_6", 50) > 70, "text": "🔴 RSI > 70（超買回檔）"},
-    "KD_gc": {"weight": 2, "condition": lambda x: x.get("kdj_k_9_3", 50) > x.get("kdj_d_9_3", 50), "text": "🟢 KD 黃金交叉"},
-    "KD_dc": {"weight": -1.5, "condition": lambda x: x.get("kdj_k_9_3", 50) < x.get("kdj_d_9_3", 50), "text": "🔴 KD 死亡交叉"},
-    "MA_cross_up": {"weight": 1, "condition": lambda x: x.get("ma5", 0) > x.get("ma20", 0), "text": "🟢 MA5 > MA20（短期翻多）"},
-    "MA_cross_down": {"weight": -1, "condition": lambda x: x.get("ma5", 0) < x.get("ma20", 0), "text": "🔴 MA5 < MA20（短期轉弱）"},
-    "MACD_gc": {"weight": 2.5, "condition": lambda x: x.get("macd_dif_12_26_9", 0) > x.get("macd_macd_12_26_9", 0), "text": "🟢 MACD 翻多"},
-    "MACD_dc": {"weight": -2, "condition": lambda x: x.get("macd_dif_12_26_9", 0) < x.get("macd_macd_12_26_9", 0), "text": "🔴 MACD 翻空"},
-    "BOLL_low": {"weight": 1, "condition": lambda x: x.get("close", 0) < x.get("boll_lower", 0), "text": "🟢 收盤 < 下軌（偏低反彈）"},
-    "BOLL_high": {"weight": -1.5, "condition": lambda x: x.get("close", 0) > x.get("boll_upper", 0), "text": "🔴 收盤 > 上軌（偏高留意）"},
-}
-
-def evaluate_signals(latest_row):
+def evaluate_signals(df, score_weights):
+    latest = df.iloc[-1]
     score = 0
-    texts = []
-    for rule in TECH_SIGNAL_RULES.values():
-        try:
-            if rule["condition"](latest_row):
-                score += rule["weight"]
-                texts.append(rule["text"])
-        except:
-            continue
-    return round(score, 2), texts
+    reasons = []
 
-def analyze_stocks_with_signals(title="📊 技術分析推薦", limit=100, min_score=2.0, filter_type="all"):
-    date = get_latest_valid_trading_date()
+    # RSI
+    if latest.get("RSI6") is not None:
+        if latest["RSI6"] < 30:
+            score += score_weights.get("RSI_LOW", 1)
+            reasons.append("🟢 RSI < 30 超跌區（RSI）")
+
+    # KD 黃金交叉
+    if latest.get("K9") is not None and latest.get("D9") is not None:
+        if latest["K9"] > latest["D9"]:
+            score += score_weights.get("KD_GOLD", 1)
+            reasons.append("🟢 KD 黃金交叉（KD）")
+
+    # 均線交叉
+    if latest.get("MA5") and latest.get("MA20"):
+        if latest["MA5"] > latest["MA20"]:
+            score += score_weights.get("MA_CROSS", 1)
+            reasons.append("🟢 MA5 > MA20（均線）")
+
+    # MACD 多頭
+    if latest.get("MACD") is not None and latest.get("DIF") is not None:
+        if latest["DIF"] > latest["MACD"]:
+            score += score_weights.get("MACD_POSITIVE", 1)
+            reasons.append("🟢 DIF > MACD（MACD）")
+
+    # 布林通道觸底反彈
+    if latest.get("Close") and latest.get("lower_band"):
+        if latest["Close"] < latest["lower_band"]:
+            score += score_weights.get("BOLLINGER_LOWER", 1)
+            reasons.append("🟢 觸及布林下緣（布林）")
+
+    return score, reasons
+
+def analyze_stocks_with_signals(
+    mode="closing",
+    limit=100,
+    min_score=2,
+    filter_type="all",
+    score_weights=None
+):
+    print(f"📌 分析模式：{mode}")
+    if score_weights is None:
+        score_weights = {
+            "RSI_LOW": 1,
+            "KD_GOLD": 1,
+            "MA_CROSS": 1,
+            "MACD_POSITIVE": 1,
+            "BOLLINGER_LOWER": 1,
+        }
+
+    start_date = (datetime.today() - timedelta(days=90)).strftime("%Y-%m-%d")
+    end_date = get_latest_valid_trading_date()
+
     stock_ids = get_hot_stock_ids(limit=limit, filter_type=filter_type)
-    results = []
+    print(f"📌 stock_ids 數量：{len(stock_ids)}")
+    if not stock_ids:
+        return "***收盤綜合推薦總結***\n⚠️ 無熱門股票資料可供分析。"
 
+    results = []
     for stock_id in stock_ids:
-        df = fetch_finmind_data(stock_id, start_date="2023-01-01", end_date=date)
-        if df is None or df.empty or "close" not in df.columns:
+        print(f"🔍 正在分析 {stock_id}...")
+        try:
+            df = fetch_stock_technical_data(stock_id, start_date, end_date)
+            if df is None or df.empty:
+                print(f"⚠️ {stock_id} 無技術資料")
+                continue
+            score, reasons = evaluate_signals(df, score_weights)
+            if score is None:
+                continue
+            results.append({
+                "stock_id": stock_id,
+                "score": score,
+                "reasons": reasons
+            })
+        except Exception as e:
+            print(f"❌ 分析 {stock_id} 發生錯誤：{e}")
             continue
 
-        df["ma5"] = df["close"].rolling(5).mean()
-        df["ma20"] = df["close"].rolling(20).mean()
-        df["boll_middle"] = df["close"].rolling(20).mean()
-        df["boll_std"] = df["close"].rolling(20).std()
-        df["boll_upper"] = df["boll_middle"] + 2 * df["boll_std"]
-        df["boll_lower"] = df["boll_middle"] - 2 * df["boll_std"]
-
-        latest = df.iloc[-1].to_dict()
-        score, signal_texts = evaluate_signals(latest)
-
-        results.append({
-            "stock_id": stock_id,
-            "score": score,
-            "signals": signal_texts
-        })
+    print(f"✅ 成功分析的股票數量：{len(results)}")
 
     if not results:
-        return f"{title}\n⚠️ 今日無法取得任何分析資料。"
+        return "***收盤綜合推薦總結***\n⚠️ 今日無法取得任何分析資料。"
 
     sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
     strong_stocks = [r for r in sorted_results if r["score"] >= min_score]
 
-    msg = f"{title}\n"
-
+    msg = "***收盤綜合推薦總結***\n"
     if strong_stocks:
-        msg += "✅ 推薦股：\n"
-        for idx, stock in enumerate(strong_stocks[:5]):
-            signals = "、".join(stock["signals"])
-            msg += f"{idx+1}. {stock['stock_id']}（總分 {stock['score']}）→ {signals}\n"
+        msg += "\n📈 推薦股票：\n"
+        for stock in strong_stocks:
+            msg += f"✅ {stock['stock_id']}（分數：{stock['score']}）\n"
+            for reason in stock["reasons"]:
+                msg += f"　↪ {reason}\n"
     else:
-        msg += "⚠️ 今日無強烈推薦股，以下為技術分數前 3 名觀察股：\n"
-        for idx, stock in enumerate(sorted_results[:3]):
-            signals = "、".join(stock["signals"])
-            msg += f"{idx+1}. {stock['stock_id']}（分數 {stock['score']}）→ {signals}\n"
+        msg += "\n⚠️ 今日無推薦股票達到門檻。\n"
+
+    # 若無強力推薦，也列出前 2~3 名當作觀察股
+    observe_stocks = sorted_results[:3]
+    if observe_stocks:
+        msg += "\n👀 技術分數前幾名（觀察名單）：\n"
+        for stock in observe_stocks:
+            msg += f"📌 {stock['stock_id']}（分數：{stock['score']}）\n"
+            for reason in stock["reasons"]:
+                msg += f"　↪ {reason}\n"
 
     return msg.strip()
