@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 def get_latest_valid_trading_date():
     """取得最近一個有效交易日（排除假日、週末）"""
     today = datetime.today()
-    for i in range(5):  # 最多往回找 5 天
+    for i in range(5):
         check_date = today - timedelta(days=i)
-        if check_date.weekday() < 5:  # 0=Mon, 6=Sun，週一到週五
+        if check_date.weekday() < 5:
             return check_date.strftime("%Y-%m-%d")
     return today.strftime("%Y-%m-%d")
 
@@ -27,9 +27,11 @@ def fetch_finmind_data(dataset, stock_id, start_date, end_date):
     }
     resp = requests.get(url, params=params)
     data = resp.json()
-    if not data["data"]:
-        print(f"⚠️ FinMind API 無資料，請檢查：{dataset} / ***'stock_id': '{stock_id}', 'start_date': '{start_date}', 'end_date': '{end_date}'***")
+
+    if "data" not in data or not data["data"]:
+        print(f"⚠️ FinMind API 無資料或格式錯誤：{dataset} / {stock_id} / {start_date} - {end_date}")
         return None
+
     return pd.DataFrame(data["data"])
 
 def fetch_stock_technical_data(stock_id, start_date, end_date):
@@ -88,8 +90,9 @@ def get_hot_stock_ids(limit=100, filter_type="all"):
     }
     resp = requests.get(url, params=params)
     data = resp.json()
-    if not data["data"]:
-        print("⚠️ 無法取得當日成交資料")
+
+    if "data" not in data or not data["data"]:
+        print("⚠️ 無法取得當日成交資料或格式錯誤：", data)
         return []
 
     df = pd.DataFrame(data["data"])
