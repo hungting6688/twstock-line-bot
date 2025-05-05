@@ -1,3 +1,4 @@
+from modules.signal_analysis import analyze_stocks_with_signals
 from modules.finmind_utils import (
     get_latest_valid_trading_date,
     fetch_finmind_data,
@@ -6,10 +7,10 @@ from modules.finmind_utils import (
 )
 
 def analyze_closing():
-    title = "📉 收盤綜合推薦總結"
+    title = "📊 收盤綜合分析"
     return analyze_stocks_with_signals(
         title=title,
         limit=300,
-        min_score=2.5,
-        filter_type="large_cap"
+        min_score=2.0,
+        filter_type="all"
     )
