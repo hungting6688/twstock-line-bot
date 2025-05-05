@@ -1,67 +1,62 @@
-import pandas as pd
-from modules.ta_analysis import analyze_signals
+# modules/signal_analysis.py
+
 from modules.price_fetcher import fetch_price_data
-from modules.stock_data_utils import get_latest_valid_trading_date, get_all_stock_ids
+from modules.ta_analysis import analyze_signals
+from modules.eps_dividend_scraper import fetch_eps_dividend_data
+from modules.stock_data_utils import get_latest_valid_trading_date
+import datetime
 
 def analyze_stocks_with_signals(
-    title: str,
-    min_score: float = 2.0,
-    limit: int = 100,
-    filter_type: str = "all",  # 可選 "all", "large_cap", "small_cap"
-    include_weak: bool = False
-) -> str:
+    title="📈 股票推薦分析",
+    stock_ids=None,
+    limit=100,
+    min_score=2.0,
+    include_weak=True,
+    filter_type="all",
+    date=None
+):
     msg = f"{title}\n"
-    date = get_latest_valid_trading_date()
+    date = date or get_latest_valid_trading_date()
+    eps_df = fetch_eps_dividend_data()
 
-    # 取得股票代碼（含 ETF，過濾下市）
-    stock_ids = get_all_stock_ids(limit=limit, filter_type=filter_type)
+    if stock_ids is None:
+        from modules.stock_data_utils import get_all_stock_ids
+        stock_ids = get_all_stock_ids(limit=limit, filter_type=filter_type)
 
-    results = []
+    all_results = []
     for stock_id in stock_ids:
-        df = fetch_price_data(stock_id, date)
-        if df is None or len(df) < 30:
+        price_data = fetch_price_data(stock_id, end=date)
+        if price_data is None or price_data.empty:
             continue
-        analysis = analyze_signals(df)
-        results.append({
-            "stock_id": stock_id,
-            "score": analysis["score"],
-            "reasons": analysis["reasons"],
-            "warnings": analysis["warnings"]
-        })
 
-    if not results:
-        msg += "⚠️ 今日無法取得任何分析資料。"
-        return msg
+        eps = eps_df[eps_df["stock_id"] == stock_id]["eps"].mean() if stock_id in eps_df["stock_id"].values else None
+        result = analyze_signals(stock_id, price_data, eps)
+        if result:
+            all_results.append(result)
 
-    # 排序，推薦股與觀察股
-    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
-    recommended = [r for r in sorted_results if r["score"] >= min_score]
-    observed = sorted_results[:3] if not recommended else []
+    if not all_results:
+        return msg + "\n⚠️ 今日無法取得任何分析資料。"
+
+    # 推薦股與觀察股分組
+    recommended = [r for r in all_results if r["score"] >= min_score]
+    observed = sorted([r for r in all_results if r["score"] < min_score], key=lambda x: x["score"], reverse=True)[:3]
+    weak_alerts = [r for r in all_results if r["is_weak"]]
 
     if recommended:
-        msg += "\n📈 推薦股票（符合條件）\n"
-        for r in recommended:
-            msg += format_stock_result(r)
+        msg += "\n✅ **推薦股（高分排序）**\n"
+        for r in sorted(recommended, key=lambda x: x["score"], reverse=True):
+            msg += f"\n{r['stock_id']} 分數：{r['score']:.1f}\n{r['summary']}"
+    else:
+        msg += "\n⚠️ 今日無符合推薦門檻的股票。\n"
 
     if observed:
-        msg += "\n📊 技術觀察（分數最高但未達推薦門檻）\n"
+        msg += "\n📌 **觀察股（次高分）**\n"
         for r in observed:
-            msg += format_stock_result(r)
+            msg += f"\n{r['stock_id']} 分數：{r['score']:.1f}\n{r['summary']}"
 
-    if include_weak:
-        weak_list = [r for r in sorted_results if r["score"] <= 0 and any("⚠️" in w for w in r["warnings"])]
-        if weak_list:
-            msg += "\n🔻 極弱警示股（技術面偏空）\n"
-            for r in weak_list[:3]:
-                msg += format_stock_result(r)
+    if include_weak and weak_alerts:
+        msg += "\n⚠️ **極弱警示股（走勢偏弱）**\n"
+        for r in weak_alerts:
+            msg += f"\n{r['stock_id']}（極弱警示）"
 
     return msg.strip()
-
-
-def format_stock_result(r):
-    reasons = "\n".join(r["reasons"]) if r["reasons"] else "（無明確利多訊號）"
-    warnings = "\n".join(r["warnings"]) if r["warnings"] else ""
-    block = f"\n➡️ {r['stock_id']}（總分 {r['score']}）\n{reasons}"
-    if warnings:
-        block += f"\n{warnings}"
-    return block + "\n"
