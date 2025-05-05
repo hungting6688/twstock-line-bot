@@ -1,14 +1,15 @@
-# modules/closing_summary.py
-
 from modules.signal_analysis import analyze_stocks_with_signals
-from modules.stock_data_utils import get_all_stock_ids
+from modules.stock_data_utils import get_latest_valid_trading_date
 
 def analyze_closing():
-    title = "📉 收盤分析報告（含中長線潛力）"
-    stock_ids = get_all_stock_ids(limit=300, filter_type="all")  # 保留 ETF，排除無效股
+    print("📌 分析模式：closing")
+    title = "📊 收盤潛力股總結推薦（15:00）"
+
     return analyze_stocks_with_signals(
-        stock_ids=stock_ids,
         title=title,
-        min_score=2.5,
-        include_weak=True
+        limit=300,  # 擴大涵蓋範圍
+        min_score=3.0,
+        filter_type="all",  # 全部股票（含 ETF）
+        include_weak=True,
+        date=get_latest_valid_trading_date()
     )
