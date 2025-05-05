@@ -7,10 +7,11 @@ from modules.finmind_utils import (
 )
 
 def analyze_closing():
-    title = "📊 收盤綜合分析"
-    return analyze_stocks_with_signals(
-        title=title,
+    title = "📊 收盤綜合分析\n"
+    body = analyze_stocks_with_signals(
         limit=300,
         min_score=2.0,
         filter_type="all"
     )
+    return title + body
+
