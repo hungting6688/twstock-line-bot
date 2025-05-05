@@ -1,80 +1,58 @@
-# modules/ta_analysis.py
-
 import pandas as pd
 
-def analyze_signals(df: pd.DataFrame) -> dict:
-    signals = {}
-    scores = 0
-    explanations = []
-    weak_flags = []
+def analyze_signals(df: pd.DataFrame):
+    score = 0
+    signals = []
+    weak_signals = []
 
-    close = df["Close"].values
-    high = df["High"].values
-    low = df["Low"].values
+    # RSI 超跌區
+    if df["RSI_6"] < 30:
+        score += 1.0
+        signals.append("🟢 RSI < 30 超跌區（反彈機會）")
+    elif df["RSI_6"] > 70:
+        score -= 1.0
+        weak_signals.append("🔴 RSI > 70 過熱區（短線留意高檔）")
 
-    # RSI6
-    delta = pd.Series(close).diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=6).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=6).mean()
-    rs = gain / loss
-    rsi6 = 100 - (100 / (1 + rs))
-    latest_rsi = rsi6.iloc[-1]
+    # KD 黃金交叉
+    if df["K"] > df["D"]:
+        score += 0.8
+        signals.append("🟢 KD 黃金交叉（技術轉強）")
+    elif df["K"] < 20 and df["D"] < 20:
+        weak_signals.append("🔴 KD 低檔盤整（暫無明確趨勢）")
 
-    if latest_rsi < 30:
-        scores += 1.0
-        explanations.append("🟢 RSI < 30 超跌區（技術面反彈機會）")
-    elif latest_rsi > 70:
-        explanations.append("🔴 RSI > 70 過熱區（短線漲多風險）")
-        weak_flags.append("RSI")
+    # 均線突破
+    if df["MA_5"] > df["MA_20"]:
+        score += 1.0
+        signals.append("🟢 MA5 > MA20（短線翻多）")
+    elif df["MA_5"] < df["MA_20"]:
+        score -= 0.8
+        weak_signals.append("🔴 MA5 < MA20（空頭排列）")
 
-    # KD
-    low_k = pd.Series(low).rolling(window=9).min()
-    high_k = pd.Series(high).rolling(window=9).max()
-    rsv = (pd.Series(close) - low_k) / (high_k - low_k) * 100
-    k = rsv.ewm(com=2).mean()
-    d = k.ewm(com=2).mean()
-    if k.iloc[-1] > d.iloc[-1]:
-        scores += 0.7
-        explanations.append("🟢 KD 黃金交叉（短期轉強）")
-    elif k.iloc[-1] < d.iloc[-1]:
-        explanations.append("🔴 KD 死亡交叉（技術轉弱）")
-        weak_flags.append("KD")
+    # MACD 多頭動能
+    if df["MACD"] > 0 and df["DIF"] > df["MACD"]:
+        score += 1.2
+        signals.append("🟢 MACD 多頭動能（上升趨勢）")
+    elif df["MACD"] < 0 and df["DIF"] < df["MACD"]:
+        score -= 1.2
+        weak_signals.append("🔴 MACD 空頭動能（下跌趨勢）")
 
-    # MA5 vs MA20
-    ma5 = pd.Series(close).rolling(window=5).mean()
-    ma20 = pd.Series(close).rolling(window=20).mean()
-    if ma5.iloc[-1] > ma20.iloc[-1]:
-        scores += 0.5
-        explanations.append("🟢 MA5 > MA20（短期趨勢翻多）")
-    else:
-        explanations.append("🔴 MA5 < MA20（短期仍偏弱）")
+    # 布林通道低檔
+    if df["Close"] < df["BB_lower"]:
+        score += 0.8
+        signals.append("🟢 跌破布林下緣（反彈機會）")
+    elif df["Close"] > df["BB_upper"]:
+        weak_signals.append("🔴 站上布林上緣（偏熱須觀察）")
 
-    # MACD
-    ema12 = pd.Series(close).ewm(span=12).mean()
-    ema26 = pd.Series(close).ewm(span=26).mean()
-    macd = ema12 - ema26
-    signal = macd.ewm(span=9).mean()
-    if macd.iloc[-1] > signal.iloc[-1]:
-        scores += 0.7
-        explanations.append("🟢 MACD 黃金交叉（中期轉強）")
-    elif macd.iloc[-1] < signal.iloc[-1]:
-        explanations.append("🔴 MACD 死亡交叉（中期走弱）")
-        weak_flags.append("MACD")
-
-    # 布林通道
-    ma20 = pd.Series(close).rolling(window=20).mean()
-    std20 = pd.Series(close).rolling(window=20).std()
-    upper = ma20 + 2 * std20
-    lower = ma20 - 2 * std20
-    if close[-1] < lower.iloc[-1]:
-        scores += 0.5
-        explanations.append("🟢 跌破布林下軌（可能超跌反彈）")
-    elif close[-1] > upper.iloc[-1]:
-        explanations.append("🔴 突破布林上軌（短期可能漲多）")
-        weak_flags.append("Bollinger")
+    # 收盤價分析
+    if df["Close"] > df["MA_20"]:
+        score += 0.5
+        signals.append("🟢 收盤價 > MA20（中線偏多）")
+    elif df["Close"] < df["MA_60"]:
+        score -= 0.5
+        weak_signals.append("🔴 收盤價 < MA60（偏空）")
 
     return {
-        "score": round(scores, 2),
-        "suggestions": explanations,
-        "is_weak": len(weak_flags) >= 2
+        "score": round(score, 2),
+        "signals": signals,
+        "weak_signals": weak_signals,
     }
