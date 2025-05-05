@@ -1,17 +1,12 @@
+# modules/price_fetcher.py
+
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
 
-def get_price_data(stock_id, start_date=None, end_date=None):
-    
-    stock_code = f"{stock_id}.TW"
-    if end_date is None:
-        end_date = datetime.today().strftime('%Y-%m-%d')
-    if start_date is None:
-        start_date = (datetime.today() - timedelta(days=180)).strftime('%Y-%m-%d')
-
+def fetch_price_data(stock_id: str):
     try:
-        df = yf.download(stock_code, start=start_date, end=end_date)
+        ticker = f"{stock_id}.TW"
+        df = yf.download(ticker, period="90d", interval="1d", progress=False)
         df = df.rename(columns={
             "Open": "open",
             "High": "high",
@@ -19,10 +14,8 @@ def get_price_data(stock_id, start_date=None, end_date=None):
             "Close": "close",
             "Volume": "volume"
         })
-        df.reset_index(inplace=True)
-        df["date"] = df["Date"].dt.strftime("%Y-%m-%d")
-        df = df[["date", "open", "high", "low", "close", "volume"]]
+        df = df[["open", "high", "low", "close", "volume"]].dropna().reset_index()
         return df
     except Exception as e:
-        print(f"❌ Yahoo Finance 抓取失敗：{stock_id} | {e}")
-        return pd.DataFrame()
+        print(f"⚠️ 無法取得 {stock_id} 資料：{e}")
+        return None
