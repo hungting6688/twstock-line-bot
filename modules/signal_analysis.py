@@ -1,10 +1,12 @@
 import os
 from datetime import datetime, timedelta
-from finmind_utils import (
+from modules.finmind_utils import (
     get_latest_valid_trading_date,
+    fetch_finmind_data,
     fetch_stock_technical_data,
     get_hot_stock_ids
 )
+
 
 def evaluate_signals(df, score_weights):
     latest = df.iloc[-1]
