@@ -66,13 +66,27 @@ def fetch_institutional_investors(stock_id):
 
 def get_hot_stock_ids(limit=100, filter_type="all", force_date=None):
     date = force_date or get_latest_valid_trading_date()
-    df = fetch_finmind_data("TaiwanStockPrice", {
-        "date": date
-    })
-    if df is None or df.empty:
+    print(f"📦 嘗試抓取熱門股資料，日期：{date}")
+    url = "https://api.finmindtrade.com/api/v4/data"
+    params = {
+        "dataset": "TaiwanStockPrice",
+        "date": date,
+        "token": FINMIND_TOKEN
+    }
+    r = requests.get(url, params=params)
+    print("🧪 API 回傳狀態碼：", r.status_code)
+    try:
+        data = r.json()
+        print("🧪 API 回傳資料筆數：", len(data.get("data", [])))
+    except Exception as e:
+        print("❌ 回傳資料解析錯誤：", e)
+        return []
+
+    if "data" not in data or not data["data"]:
         print(f"⚠️ 無熱門股資料可分析（日期：{date}）")
         return []
 
+    df = pd.DataFrame(data["data"])
     df = df[df["Trading_Volume"] > 0]
     df = df.groupby("stock_id").agg({"Trading_Volume": "sum"}).reset_index()
     df = df.sort_values(by="Trading_Volume", ascending=False)
