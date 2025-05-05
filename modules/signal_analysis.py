@@ -1,9 +1,8 @@
 
 from modules.finmind_utils import fetch_finmind_data, get_hot_stock_ids, get_latest_valid_trading_date
-from datetime import datetime
 import pandas as pd
 
-# 技術指標規則與加權分數設定
+# 技術指標與權重設定
 TECH_SIGNAL_RULES = {
     "RSI_low": {"weight": 1.5, "condition": lambda x: x.get("rsi_6", 50) < 30, "text": "🟢 RSI < 30（超跌反彈）"},
     "RSI_high": {"weight": -1, "condition": lambda x: x.get("rsi_6", 50) > 70, "text": "🔴 RSI > 70（超買回檔）"},
@@ -20,7 +19,7 @@ TECH_SIGNAL_RULES = {
 def evaluate_signals(latest_row):
     score = 0
     texts = []
-    for key, rule in TECH_SIGNAL_RULES.items():
+    for rule in TECH_SIGNAL_RULES.values():
         try:
             if rule["condition"](latest_row):
                 score += rule["weight"]
@@ -56,7 +55,8 @@ def analyze_stocks_with_signals(title="📊 技術分析推薦", limit=100, min_
         })
 
     if not results:
-        return f"{title}⚠️ 今日無法取得任何分析資料。"
+        return f"{title}
+⚠️ 今日無法取得任何分析資料。"
 
     sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
     strong_stocks = [r for r in sorted_results if r["score"] >= min_score]
