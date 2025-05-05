@@ -1,36 +1,49 @@
-# modules/stock_data_utils.py
-
 import datetime
+import requests
 import pandas as pd
-import yfinance as yf
+import gspread
+import os
+import json
+from oauth2client.service_account import ServiceAccountCredentials
 
-# 抓取所有上市上櫃股票（不含已下市）
-def get_all_stock_ids(limit=None, filter_type="all"):
-    from modules.twse_scraper import get_all_valid_twse_stocks
-    all_stocks = get_all_valid_twse_stocks()
-
-    # 篩選條件：依市值估算大小股
-    if filter_type == "large_cap":
-        filtered = [s for s in all_stocks if s["市值(億元)"] >= 300]
-    elif filter_type == "small_cap":
-        filtered = [s for s in all_stocks if s["市值(億元)"] < 300]
-    else:
-        filtered = all_stocks
-
-    stock_ids = [s["股票代號"] for s in filtered if s["股票代號"].isdigit()]
-    if limit:
-        stock_ids = stock_ids[:limit]
-    return stock_ids
-
-# 🔁 保留以便日後調用
-def get_hot_stock_ids(limit=100, filter_type="all"):
-    return get_all_stock_ids(limit=limit, filter_type=filter_type)
-
-# 尋找最近一個交易日（避免週末與國定假日）
 def get_latest_valid_trading_date():
     today = datetime.date.today()
-    for i in range(5):
-        date = today - datetime.timedelta(days=i)
-        if date.weekday() < 5:  # 週一～週五為有效交易日
+    delta = datetime.timedelta(days=1)
+    for i in range(7):  # 最多往前找一週
+        date = today - delta * i
+        if date.weekday() < 5:  # 0=Monday, 6=Sunday
             return date.strftime("%Y-%m-%d")
     return today.strftime("%Y-%m-%d")
+
+def get_all_stock_ids(limit=100, filter_type="all", include_etf=True):
+    from modules.twse_scraper import get_all_valid_twse_stocks
+
+    all_stocks = get_all_valid_twse_stocks()
+    if not include_etf:
+        all_stocks = all_stocks[~all_stocks["證券名稱"].str.contains("ETF")]
+
+    if filter_type == "large_cap":
+        stocks = all_stocks.head(limit)
+    elif filter_type == "small_cap":
+        stocks = all_stocks.tail(limit)
+    else:
+        stocks = all_stocks.sample(n=limit, random_state=42) if limit else all_stocks
+
+    return stocks["證券代號"].tolist()
+
+def get_tracking_stock_ids(sheet_name="追蹤清單", col=1):
+    """
+    從 Google Sheets 讀取 A 欄的自選追蹤股票代碼，排除第一列標題。
+    """
+    json_key = json.loads(os.environ["GOOGLE_JSON_KEY"])
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(json_key, scope)
+    gc = gspread.authorize(credentials)
+    
+    sheet_id = os.environ.get("GOOGLE_SHEET_ID")
+    sh = gc.open_by_key(sheet_id)
+    worksheet = sh.worksheet(sheet_name)
+
+    stock_ids = worksheet.col_values(col)[1:]  # 跳過第一列標題
+    stock_ids = [s.strip() for s in stock_ids if s.strip() != ""]
+    return stock_ids
