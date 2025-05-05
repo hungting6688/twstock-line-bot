@@ -2,7 +2,7 @@ name: 收盤分析（15:00）
 
 on:
   schedule:
-    - cron: '0 7 * * 1-5'  # 台灣 15:00 = UTC+8 → UTC 07:00
+    - cron: '0 7 * * 1-5'  # 台灣15:00 = UTC+8 → UTC 07:00
   workflow_dispatch:
 
 jobs:
@@ -10,19 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
       - name: Run Closing Summary
         env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-          GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
         run: python main.py --mode=closing
