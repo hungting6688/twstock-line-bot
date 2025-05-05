@@ -1,103 +1,110 @@
-import pandas as pd
-from modules.price_fetcher import get_price_data
-from modules.ta_analysis import apply_all_indicators
-from modules.eps_dividend_scraper import fetch_twse_eps_dividend
+# modules/signal_analysis.py
 
-def analyze_stocks_with_signals(title="📈 推薦股分析", limit=100, min_score=2.0, filter_type="all"):
-    stock_ids = get_default_hot_stock_ids(limit)
+from modules.stock_data_utils import get_latest_valid_trading_date, get_hot_stock_ids
+from modules.price_fetcher import fetch_price_data
+from modules.ta_analysis import analyze_technical_indicators
+from modules.eps_dividend_scraper import fetch_eps_dividend_info
 
-    # 基本面資料一次抓取
-    df_fundamentals = fetch_twse_eps_dividend()
+def analyze_stocks_with_signals(
+    title="📈 股票分析報告",
+    limit=100,
+    min_score=2.0,
+    filter_type="all"
+):
+    date = get_latest_valid_trading_date()
+    stock_ids = get_hot_stock_ids(limit=limit, filter_type=filter_type)
 
     results = []
+    eps_info = fetch_eps_dividend_info()
+
     for stock_id in stock_ids:
-        price_df = get_price_data(stock_id)
-        if price_df.empty or len(price_df) < 30:
+        try:
+            price_df = fetch_price_data(stock_id)
+            if price_df is None or price_df.empty:
+                print(f"⚠️ 無法取得 {stock_id} 價格資料")
+                continue
+
+            signals, score = analyze_technical_indicators(price_df)
+            eps_data = eps_info.get(stock_id, {})
+            explanations = []
+
+            # EPS 條件加分
+            eps = eps_data.get("EPS", 0)
+            if eps and eps > 2:
+                score += 0.5
+                explanations.append("🔵 EPS 高於 2，基本面穩定")
+
+            # 殖利率條件加分
+            dividend_yield = eps_data.get("殖利率", 0)
+            if dividend_yield and dividend_yield > 4:
+                score += 0.5
+                explanations.append(f"🔵 殖利率 {dividend_yield}% 吸引人")
+
+            # 法人條件加分
+            if eps_data.get("法人連買", False):
+                score += 0.5
+                explanations.append("🟣 法人連續買超，籌碼穩定")
+
+            # 極弱股提醒：符合 MACD 死亡交叉或 RSI > 70
+            weak_signals = []
+            if "🔻 MACD 死亡交叉，趨勢轉弱" in signals:
+                weak_signals.append("MACD 死亡交叉")
+            if "🔻 RSI > 70 過熱區，提防拉回" in signals:
+                weak_signals.append("RSI 高檔")
+
+            result = {
+                "stock_id": stock_id,
+                "score": round(score, 2),
+                "signals": signals,
+                "explanations": explanations,
+                "weak_signals": weak_signals,
+                "name": eps_data.get("name", "")
+            }
+            results.append(result)
+
+        except Exception as e:
+            print(f"⚠️ 分析 {stock_id} 發生錯誤：{e}")
             continue
 
-        df = apply_all_indicators(price_df)
-        latest = df.iloc[-1]
-
-        score = 0
-        reasons = []
-
-        # === 技術分析評分邏輯（含白話建議）===
-        if latest["RSI6"] < 30:
-            score += 1.0
-            reasons.append("🟢 RSI < 30 超跌區，股價可能有反彈機會，可觀察是否止穩回升")
-
-        if latest["K"] > latest["D"]:
-            score += 1.0
-            reasons.append("🟢 KD 黃金交叉，短線技術轉強，可關注是否進入多頭格局")
-
-        if latest["MA5"] > latest["MA20"]:
-            score += 1.0
-            reasons.append("🟢 短均穿越長均（MA5 > MA20），顯示趨勢翻多，盤勢有機會向上延伸")
-
-        if latest["MACD"] > latest["MACD_signal"]:
-            score += 1.0
-            reasons.append("🟢 MACD 多頭排列，動能轉強，若量能配合可考慮短期布局")
-
-        if latest["close"] < latest["BOLL_lower"]:
-            score += 1.0
-            reasons.append("🟢 跌破布林下緣，短線可能超跌，有機會反彈，可設停損觀察")
-
-        # === 基本面評分（來自 TWSE，含白話建議）===
-        row = df_fundamentals[df_fundamentals["stock_id"] == stock_id]
-        if not row.empty:
-            row = row.iloc[0]
-            try:
-                if float(row["dividend_yield"]) > 5:
-                    score += 1.0
-                    reasons.append("🟢 殖利率 > 5%，具備長期收益潛力，適合關注存股族標的")
-
-                if float(row["eps"]) > 3:
-                    score += 1.0
-                    reasons.append("🟢 EPS > 3 元，獲利穩健，基本面佳，可中長期關注")
-
-                if float(row["pb_ratio"]) < 2:
-                    score += 0.5
-                    reasons.append("🟢 淨值比 < 2，股價相對淨值偏低，有基本面低估的機會")
-            except:
-                pass
-
-        results.append({
-            "stock_id": stock_id,
-            "score": score,
-            "reasons": reasons
-        })
-
     if not results:
-        return f"{title}\n⚠️ 今日無分析結果（資料不足或皆不符條件）"
+        return f"{title}\n⚠️ 今日無法取得任何分析資料。"
 
-    # 依分數排序
-    df_result = pd.DataFrame(results)
-    df_result = df_result.sort_values(by="score", ascending=False)
+    # 分數排序
+    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
 
-    # 推薦股
-    recommended = df_result[df_result["score"] >= min_score]
-    observe = df_result.head(3)
+    # 篩出符合推薦分數門檻的股票
+    recommended = [r for r in sorted_results if r["score"] >= min_score]
+    top_candidates = sorted_results[:3]
 
     msg = f"{title}\n"
-    if not recommended.empty:
-        msg += "\n✅ 推薦股：\n"
-        for _, row in recommended.iterrows():
-            reasons = "；".join(row["reasons"])
-            msg += f"🔸 {row['stock_id']}（{row['score']} 分）\n{reasons}\n"
-    else:
-        msg += "\n⚠️ 今日無符合推薦分數門檻之股票。\n"
 
-    msg += "\n📌 技術觀察股（分數最高前三名）：\n"
-    for _, row in observe.iterrows():
-        reasons = "；".join(row["reasons"])
-        msg += f"🔹 {row['stock_id']}（{row['score']} 分）\n{reasons}\n"
+    if recommended:
+        msg += "\n✅ 今日推薦股（分數 ≥ " + str(min_score) + "）\n"
+        for r in recommended:
+            name_part = f"{r['name']} ({r['stock_id']})" if r['name'] else r['stock_id']
+            msg += f"\n🔹 {name_part}｜分數：{r['score']}\n"
+            for s in r["signals"]:
+                msg += f"　• {s}\n"
+            for e in r["explanations"]:
+                msg += f"　• {e}\n"
+    else:
+        msg += "\n⚠️ 今日無推薦股，以下為觀察分數較高者：\n"
+        for r in top_candidates:
+            name_part = f"{r['name']} ({r['stock_id']})" if r['name'] else r['stock_id']
+            msg += f"\n🔸 {name_part}｜分數：{r['score']}\n"
+            for s in r["signals"]:
+                msg += f"　• {s}\n"
+            for e in r["explanations"]:
+                msg += f"　• {e}\n"
+
+    # 額外提醒弱勢訊號
+    weak_list = [r for r in sorted_results if r["score"] < 1.5 and r["weak_signals"]]
+    if weak_list:
+        msg += "\n\n⚠️ 極弱訊號股（技術面轉弱，請留意）：\n"
+        for r in weak_list[:5]:
+            name_part = f"{r['name']} ({r['stock_id']})" if r['name'] else r['stock_id']
+            msg += f"\n🚨 {name_part}｜分數：{r['score']}\n"
+            for w in r["weak_signals"]:
+                msg += f"　• {w}\n"
 
     return msg.strip()
-
-
-def get_default_hot_stock_ids(limit=100):
-    return [
-        "2330", "2317", "2303", "2603", "3711", "2881", "2454", "2609", "3231",
-        "1513", "3707", "8046", "3034", "1101", "1301", "2002", "2882", "2891",
-        "2409", "2615", "6147", "8261", "3045", "2344", "4919", "2605", "2408"
-    ][:limit]
