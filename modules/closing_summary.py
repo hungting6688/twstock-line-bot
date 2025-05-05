@@ -1,12 +1,13 @@
+# modules/closing_summary.py
 
 from modules.signal_analysis import analyze_stocks_with_signals
+from modules.stock_data_utils import get_latest_valid_trading_date, get_hot_stock_ids
 
 def analyze_closing():
-    print("📌 分析模式：closing（15:00 收盤綜合分析）")
+    title = "📊 收盤分析報告"
     return analyze_stocks_with_signals(
+        title=title,
         limit=300,
-        min_score=2.0,
-        filter_type="all",
-        debug=True
+        min_score=2.5,
+        filter_type="all"
     )
-
