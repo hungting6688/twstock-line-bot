@@ -1,3 +1,4 @@
+
 from modules.finmind_utils import fetch_finmind_data, get_hot_stock_ids, get_latest_valid_trading_date
 from datetime import datetime
 import pandas as pd
@@ -48,20 +49,35 @@ def analyze_stocks_with_signals(title="📊 技術分析推薦", limit=100):
         latest = df.iloc[-1].to_dict()
         score, signal_texts = evaluate_signals(latest)
 
-        if score >= 2:
-            results.append({
-                "stock_id": stock_id,
-                "score": score,
-                "signals": signal_texts
-            })
+        results.append({
+            "stock_id": stock_id,
+            "score": score,
+            "signals": signal_texts
+        })
 
     if not results:
-        return f"{title}\n今日無符合條件的推薦股。"
+        return f"{title}
+⚠️ 今日無法取得任何分析資料。"
 
     sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
-    msg = f"{title}\n"
-    for idx, stock in enumerate(sorted_results[:5]):
-        signals = "、".join(stock["signals"])
-        msg += f"{idx+1}. {stock['stock_id']}（總分 {stock['score']}）→ {signals}\n"
+    strong_stocks = [r for r in sorted_results if r["score"] >= 2]
+
+    msg = f"{title}
+"
+
+    if strong_stocks:
+        msg += "✅ 推薦股：
+"
+        for idx, stock in enumerate(strong_stocks[:5]):
+            signals = "、".join(stock["signals"])
+            msg += f"{idx+1}. {stock['stock_id']}（總分 {stock['score']}）→ {signals}
+"
+    else:
+        msg += "⚠️ 今日無強烈推薦股，以下為技術分數前 3 名觀察股：
+"
+        for idx, stock in enumerate(sorted_results[:3]):
+            signals = "、".join(stock["signals"])
+            msg += f"{idx+1}. {stock['stock_id']}（分數 {stock['score']}）→ {signals}
+"
 
     return msg.strip()
