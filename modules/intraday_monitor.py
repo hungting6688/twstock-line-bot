@@ -1,15 +1,9 @@
-from modules.finmind_utils import (
-    get_latest_valid_trading_date,
-    fetch_finmind_data,
-    fetch_stock_technical_data,
-    get_hot_stock_ids
-)
+from modules.signal_analysis import analyze_stocks_with_signals
 
 def analyze_intraday():
-    title = "📍 盤中監控速報"
+    print("📌 分析模式：intraday（10:30 盤中監控）")
     return analyze_stocks_with_signals(
-        title=title,
-        limit=100,
-        min_score=1.5,
-        filter_type="all"
+        limit=100,            # 前 100 大熱門股
+        min_score=1.5,        # 推薦門檻放寬
+        filter_type="all"     # 大中小型皆可
     )
