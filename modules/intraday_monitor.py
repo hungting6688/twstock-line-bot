@@ -9,9 +9,9 @@ def analyze_intraday():
     date = get_latest_valid_trading_date()
 
     return analyze_stocks_with_signals(
-        title="⏱️ 盤中監控推薦股",
-        stock_ids=None,       # 自動抓台股熱門股＋Google Sheet
-        limit=100,
+        title="🔍 盤中觀察股報告",
+        stock_ids=None,       # 自動抓熱門股＋Google Sheet
+        limit=150,
         min_score=2.0,
         include_weak=True,
         filter_type="all",
