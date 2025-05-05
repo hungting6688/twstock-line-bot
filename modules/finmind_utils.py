@@ -1,3 +1,4 @@
+
 import os
 import json
 import pandas as pd
@@ -46,7 +47,7 @@ def fetch_financial_statement(stock_id):
     if df is not None and not df.empty:
         df = df[df["type"] == "綜合損益表"]
         df = df[df["column"] == "基本每股盈餘（元）"]
-        df = df[df["date"].str.contains("Q4")]  # 取年報 EPS
+        df = df[df["date"].str.contains("Q4")]
         df["date"] = pd.to_datetime(df["date"])
         df["EPS"] = df["value"]
         return df[["date", "EPS"]]
@@ -63,11 +64,13 @@ def fetch_institutional_investors(stock_id):
         return df
     return None
 
-def get_hot_stock_ids(limit=100, filter_type="all"):
+def get_hot_stock_ids(limit=100, filter_type="all", force_date=None):
+    date = force_date or get_latest_valid_trading_date()
     df = fetch_finmind_data("TaiwanStockPrice", {
-        "date": get_latest_valid_trading_date()
+        "date": date
     })
-    if df is None or df.empty or "data" not in df:
+    if df is None or df.empty:
+        print(f"⚠️ 無熱門股資料可分析（日期：{date}）")
         return []
 
     df = df[df["Trading_Volume"] > 0]
@@ -75,9 +78,9 @@ def get_hot_stock_ids(limit=100, filter_type="all"):
     df = df.sort_values(by="Trading_Volume", ascending=False)
 
     if filter_type == "small_cap":
-        df = df[df["stock_id"].str.startswith(("3", "6", "8"))]  # 小型股
+        df = df[df["stock_id"].str.startswith(("3", "6", "8"))]
     elif filter_type == "large_cap":
-        df = df[df["stock_id"].str.startswith(("1", "2"))]  # 大型股
+        df = df[df["stock_id"].str.startswith(("1", "2"))]
 
     return df["stock_id"].head(limit).tolist()
 
