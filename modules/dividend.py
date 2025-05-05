@@ -2,4 +2,9 @@ from modules.signal_analysis import analyze_stocks_with_signals
 
 def analyze_dividend():
     title = "💰 中午潛力股速報"
-    return analyze_stocks_with_signals(title=title, limit=150)
+    return analyze_stocks_with_signals(
+        title=title,
+        limit=150,
+        min_score=1.5,
+        filter_type="small_cap"
+    )
