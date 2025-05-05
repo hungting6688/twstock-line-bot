@@ -3,7 +3,7 @@ from modules.finmind_utils import fetch_finmind_data, get_hot_stock_ids, get_lat
 from datetime import datetime
 import pandas as pd
 
-# 權重設定與對應解釋
+# 技術指標規則與加權分數設定
 TECH_SIGNAL_RULES = {
     "RSI_low": {"weight": 1.5, "condition": lambda x: x.get("rsi_6", 50) < 30, "text": "🟢 RSI < 30（超跌反彈）"},
     "RSI_high": {"weight": -1, "condition": lambda x: x.get("rsi_6", 50) > 70, "text": "🔴 RSI > 70（超買回檔）"},
@@ -29,9 +29,9 @@ def evaluate_signals(latest_row):
             continue
     return round(score, 2), texts
 
-def analyze_stocks_with_signals(title="📊 技術分析推薦", limit=100):
+def analyze_stocks_with_signals(title="📊 技術分析推薦", limit=100, min_score=2.0, filter_type="all"):
     date = get_latest_valid_trading_date()
-    stock_ids = get_hot_stock_ids(limit=limit)
+    stock_ids = get_hot_stock_ids(limit=limit, filter_type=filter_type)
     results = []
 
     for stock_id in stock_ids:
@@ -56,11 +56,11 @@ def analyze_stocks_with_signals(title="📊 技術分析推薦", limit=100):
         })
 
     if not results:
-    return f"{title}\n⚠️ 今日無法取得任何分析資料。"
-
+        return f"{title}
+⚠️ 今日無法取得任何分析資料。"
 
     sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
-    strong_stocks = [r for r in sorted_results if r["score"] >= 2]
+    strong_stocks = [r for r in sorted_results if r["score"] >= min_score]
 
     msg = f"{title}
 "
