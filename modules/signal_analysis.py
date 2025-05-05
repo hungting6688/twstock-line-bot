@@ -61,22 +61,18 @@ def analyze_stocks_with_signals(title="📊 技術分析推薦", limit=100, min_
     sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
     strong_stocks = [r for r in sorted_results if r["score"] >= min_score]
 
-    msg = f"{title}
-"
+msg = f"{title}\n"
 
-    if strong_stocks:
-        msg += "✅ 推薦股：
-"
-        for idx, stock in enumerate(strong_stocks[:5]):
-            signals = "、".join(stock["signals"])
-            msg += f"{idx+1}. {stock['stock_id']}（總分 {stock['score']}）→ {signals}
-"
-    else:
-        msg += "⚠️ 今日無強烈推薦股，以下為技術分數前 3 名觀察股：
-"
-        for idx, stock in enumerate(sorted_results[:3]):
-            signals = "、".join(stock["signals"])
-            msg += f"{idx+1}. {stock['stock_id']}（分數 {stock['score']}）→ {signals}
-"
+if strong_stocks:
+    msg += "✅ 推薦股：\n"
+    for idx, stock in enumerate(strong_stocks[:5]):
+        signals = "、".join(stock["signals"])
+        msg += f"{idx+1}. {stock['stock_id']}（總分 {stock['score']}）→ {signals}\n"
+else:
+    msg += "⚠️ 今日無強烈推薦股，以下為技術分數前 3 名觀察股：\n"
+    for idx, stock in enumerate(sorted_results[:3]):
+        signals = "、".join(stock["signals"])
+        msg += f"{idx+1}. {stock['stock_id']}（分數 {stock['score']}）→ {signals}\n"
+
 
     return msg.strip()
