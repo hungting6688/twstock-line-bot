@@ -55,8 +55,7 @@ def analyze_stocks_with_signals(title="📊 技術分析推薦", limit=100, min_
         })
 
     if not results:
-        return f"{title}
-⚠️ 今日無法取得任何分析資料。"
+        return f"{title}⚠️ 今日無法取得任何分析資料。“
 
     sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
     strong_stocks = [r for r in sorted_results if r["score"] >= min_score]
