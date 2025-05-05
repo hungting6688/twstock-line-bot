@@ -1,73 +1,67 @@
-import datetime
+import pandas as pd
 from modules.ta_analysis import analyze_signals
-from modules.eps_dividend_scraper import get_eps_data, get_dividend_yield
-from modules.stock_data_utils import get_stock_name
+from modules.price_fetcher import fetch_price_data
+from modules.stock_data_utils import get_latest_valid_trading_date, get_all_stock_ids
 
 def analyze_stocks_with_signals(
-    stock_ids,
-    title="📌 股票分析",
-    min_score=2.0,
-    include_weak=False
-):
-    today = datetime.date.today()
-    eps_data = get_eps_data()
-    dividend_data = get_dividend_yield()
+    title: str,
+    min_score: float = 2.0,
+    limit: int = 100,
+    filter_type: str = "all",  # 可選 "all", "large_cap", "small_cap"
+    include_weak: bool = False
+) -> str:
+    msg = f"{title}\n"
+    date = get_latest_valid_trading_date()
+
+    # 取得股票代碼（含 ETF，過濾下市）
+    stock_ids = get_all_stock_ids(limit=limit, filter_type=filter_type)
 
     results = []
-    weak_stocks = {}
-
     for stock_id in stock_ids:
-        stock_name = get_stock_name(stock_id)
-        signals, score, weak_reasons = analyze_signals(stock_id)
-
-        if not signals and not weak_reasons:
+        df = fetch_price_data(stock_id, date)
+        if df is None or len(df) < 30:
             continue
-
-        # 技術分數不足，記錄為觀察或極弱
-        if score < min_score:
-            if include_weak and weak_reasons:
-                weak_stocks[f"{stock_id} {stock_name}"] = weak_reasons
-            results.append({
-                "stock_id": stock_id,
-                "stock_name": stock_name,
-                "score": score,
-                "signals": signals
-            })
-            continue
-
+        analysis = analyze_signals(df)
         results.append({
             "stock_id": stock_id,
-            "stock_name": stock_name,
-            "score": score,
-            "signals": signals
+            "score": analysis["score"],
+            "reasons": analysis["reasons"],
+            "warnings": analysis["warnings"]
         })
 
-    if not results and not weak_stocks:
-        return f"{title}\n⚠️ 今日無法取得任何分析資料。"
+    if not results:
+        msg += "⚠️ 今日無法取得任何分析資料。"
+        return msg
 
-    # 推薦與觀察股排序
-    recommended = [r for r in results if r["score"] >= min_score]
-    observed = [r for r in results if r["score"] < min_score]
-    recommended.sort(key=lambda x: x["score"], reverse=True)
-    observed.sort(key=lambda x: x["score"], reverse=True)
+    # 排序，推薦股與觀察股
+    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
+    recommended = [r for r in sorted_results if r["score"] >= min_score]
+    observed = sorted_results[:3] if not recommended else []
 
-    # 組合推播訊息
-    msg = f"{title}\n📅 {today.strftime('%Y-%m-%d')}\n"
     if recommended:
-        msg += "\n✅ 推薦觀察股：\n"
+        msg += "\n📈 推薦股票（符合條件）\n"
         for r in recommended:
-            signal_str = "、".join(r["signals"])
-            msg += f"🔹 {r['stock_id']} {r['stock_name']}（分數：{r['score']}）\n👉 {signal_str}\n"
+            msg += format_stock_result(r)
 
-    if not recommended and observed:
-        msg += "\n☁️ 今日無推薦股，以下為技術分數前幾名：\n"
-        for r in observed[:3]:
-            signal_str = "、".join(r["signals"])
-            msg += f"🔸 {r['stock_id']} {r['stock_name']}（分數：{r['score']}）\n👉 {signal_str}\n"
+    if observed:
+        msg += "\n📊 技術觀察（分數最高但未達推薦門檻）\n"
+        for r in observed:
+            msg += format_stock_result(r)
 
-    if include_weak and weak_stocks:
-        msg += "\n⚠️ 極弱觀察股（建議避開）:\n"
-        for sid, reasons in weak_stocks.items():
-            msg += f"🔻 {sid}：{'、'.join(reasons)}\n"
+    if include_weak:
+        weak_list = [r for r in sorted_results if r["score"] <= 0 and any("⚠️" in w for w in r["warnings"])]
+        if weak_list:
+            msg += "\n🔻 極弱警示股（技術面偏空）\n"
+            for r in weak_list[:3]:
+                msg += format_stock_result(r)
 
     return msg.strip()
+
+
+def format_stock_result(r):
+    reasons = "\n".join(r["reasons"]) if r["reasons"] else "（無明確利多訊號）"
+    warnings = "\n".join(r["warnings"]) if r["warnings"] else ""
+    block = f"\n➡️ {r['stock_id']}（總分 {r['score']}）\n{reasons}"
+    if warnings:
+        block += f"\n{warnings}"
+    return block + "\n"
