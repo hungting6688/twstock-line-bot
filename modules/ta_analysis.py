@@ -1,58 +1,62 @@
 import pandas as pd
 
-def analyze_signals(df: pd.DataFrame):
+def analyze_signals(df: pd.DataFrame) -> dict:
     score = 0
-    signals = []
-    weak_signals = []
+    reasons = []
+    suggestions = []
 
-    # RSI 超跌區
-    if df["RSI_6"] < 30:
-        score += 1.0
-        signals.append("🟢 RSI < 30 超跌區（反彈機會）")
-    elif df["RSI_6"] > 70:
-        score -= 1.0
-        weak_signals.append("🔴 RSI > 70 過熱區（短線留意高檔）")
+    # MACD
+    if df["MACD_diff"] > 0 and df["MACD"] > 0:
+        score += 1.2
+        reasons.append("🟢 MACD多頭排列")
+        suggestions.append("MACD 呈現正向，趨勢偏多，考慮觀察是否有突破訊號")
+
+    elif df["MACD_diff"] < 0 and df["MACD"] < 0:
+        score -= 1.2
+        reasons.append("🔻 MACD空頭排列")
+        suggestions.append("MACD 處於弱勢區，避免進場，或評估是否反彈")
+
+    # RSI
+    if df["RSI6"] < 30:
+        score += 1
+        reasons.append("🟢 RSI < 30 超跌區")
+        suggestions.append("RSI 過低，短線可能反彈，可觀察量價變化")
+
+    elif df["RSI6"] > 70:
+        score -= 1
+        reasons.append("🔻 RSI > 70 過熱")
+        suggestions.append("RSI 偏高，須提防漲多拉回")
 
     # KD 黃金交叉
     if df["K"] > df["D"]:
-        score += 0.8
-        signals.append("🟢 KD 黃金交叉（技術轉強）")
-    elif df["K"] < 20 and df["D"] < 20:
-        weak_signals.append("🔴 KD 低檔盤整（暫無明確趨勢）")
+        score += 1
+        reasons.append("🟢 KD 黃金交叉")
+        suggestions.append("KD 呈現黃金交叉，技術轉強，可考慮留意進場點")
 
-    # 均線突破
-    if df["MA_5"] > df["MA_20"]:
-        score += 1.0
-        signals.append("🟢 MA5 > MA20（短線翻多）")
-    elif df["MA_5"] < df["MA_20"]:
-        score -= 0.8
-        weak_signals.append("🔴 MA5 < MA20（空頭排列）")
+    # 均線
+    if df["MA5"] > df["MA20"]:
+        score += 1
+        reasons.append("🟢 均線多頭排列")
+        suggestions.append("短均線突破長均線，顯示短線趨勢轉強")
 
-    # MACD 多頭動能
-    if df["MACD"] > 0 and df["DIF"] > df["MACD"]:
-        score += 1.2
-        signals.append("🟢 MACD 多頭動能（上升趨勢）")
-    elif df["MACD"] < 0 and df["DIF"] < df["MACD"]:
-        score -= 1.2
-        weak_signals.append("🔴 MACD 空頭動能（下跌趨勢）")
+    elif df["MA5"] < df["MA20"]:
+        score -= 1
+        reasons.append("🔻 均線空頭排列")
+        suggestions.append("短均線在長均線下方，顯示趨勢仍偏弱")
 
-    # 布林通道低檔
-    if df["Close"] < df["BB_lower"]:
-        score += 0.8
-        signals.append("🟢 跌破布林下緣（反彈機會）")
-    elif df["Close"] > df["BB_upper"]:
-        weak_signals.append("🔴 站上布林上緣（偏熱須觀察）")
-
-    # 收盤價分析
-    if df["Close"] > df["MA_20"]:
+    # 布林通道下緣反彈
+    if df["Close"] < df["BOLL_LB"]:
         score += 0.5
-        signals.append("🟢 收盤價 > MA20（中線偏多）")
-    elif df["Close"] < df["MA_60"]:
-        score -= 0.5
-        weak_signals.append("🔴 收盤價 < MA60（偏空）")
+        reasons.append("🟢 跌破布林下緣")
+        suggestions.append("股價偏離布林下軌，可能反彈，可觀察止穩情況")
+
+    # 終極弱勢判斷
+    if score <= -2.5:
+        reasons.append("⚠️ 技術面極弱")
+        suggestions.append("此股技術面訊號全面偏空，暫不建議介入")
 
     return {
         "score": round(score, 2),
-        "signals": signals,
-        "weak_signals": weak_signals,
+        "reasons": reasons,
+        "suggestions": suggestions
     }
