@@ -43,10 +43,18 @@ def analyze_stocks_with_signals(
         suggestion = tech_results[sid]["suggestion"]
         is_weak = tech_results[sid]["is_weak"]
 
+        eps = eps_data.get(sid, {}).get("eps", None)
+        dividend = dividend_data.get(sid, None)
+
+        eps_text = f" | EPS: {eps}" if eps is not None else ""
+        div_text = f" | 現金股利: {dividend}" if dividend is not None else ""
+
+        line = f"{sid} | Score: {score} | {suggestion}{eps_text}{div_text}"
+
         if score >= min_score:
-            recommend.append(f"{sid} | Score: {score} | {suggestion}")
+            recommend.append(line)
         else:
-            fallback.append((score, f"{sid} | Score: {score} | {suggestion}"))
+            fallback.append((score, line))
 
         if include_weak and is_weak:
             weak_list.append(sid)
