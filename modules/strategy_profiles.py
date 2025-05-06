@@ -1,6 +1,8 @@
+# modules/strategy_profiles.py
+
 print("[strategy_profiles] ✅ 已載入策略設定檔（含權重）")
 
-strategy_profiles = {
+STRATEGY_CONFIGS = {
     "opening": {
         "limit": 100,
         "min_score": 3.5,
@@ -10,6 +12,7 @@ strategy_profiles = {
             "macd": 1.5,
             "kd": 1.0,
             "rsi": 1.0,
+            "boll": 0.5,
             "eps": 1.5,
             "dividend": 1.5
         }
@@ -23,6 +26,7 @@ strategy_profiles = {
             "macd": 1.2,
             "kd": 1.2,
             "rsi": 1.0,
+            "boll": 0.5,
             "eps": 1.0,
             "dividend": 1.0
         }
@@ -36,12 +40,13 @@ strategy_profiles = {
             "macd": 1.2,
             "kd": 1.0,
             "rsi": 0.8,
+            "boll": 0.5,
             "eps": 1.0,
             "dividend": 2.0
         }
     },
     "closing": {
-        "limit": 300,
+        "limit": 450,
         "min_score": 3.2,
         "include_weak": True,
         "weights": {
@@ -49,6 +54,7 @@ strategy_profiles = {
             "macd": 1.5,
             "kd": 1.0,
             "rsi": 1.0,
+            "boll": 0.5,
             "eps": 2.0,
             "dividend": 1.5
         }
@@ -56,10 +62,4 @@ strategy_profiles = {
 }
 
 def get_strategy(mode: str):
-    return strategy_profiles.get(mode, strategy_profiles["opening"])
-
-# ✅ 提供給其他模組使用的名稱
-STRATEGY_CONFIGS = strategy_profiles
-
-# ✅ 補上 default 策略，避免其他模組報錯
-STRATEGY_CONFIGS["default"] = STRATEGY_CONFIGS["opening"]
+    return STRATEGY_CONFIGS.get(mode, STRATEGY_CONFIGS["opening"])
