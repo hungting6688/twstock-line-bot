@@ -1,4 +1,4 @@
-print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
+print("[price_fetcher] ✅ 載入強化版 (含原始內容解析預覽)")
 
 import requests
 import pandas as pd
@@ -11,6 +11,12 @@ def get_realtime_top_stocks(min_turnover=50000000, limit=100):
         response = requests.get(url, timeout=10)
         response.encoding = "big5"
 
+        if not response.text.strip():
+            print("[price_fetcher] ❌ 回傳內容為空")
+            return []
+
+        print(f"[price_fetcher] 原始資料首 5 行：\n{''.join(response.text.splitlines()[:5])}")
+
         lines = response.text.splitlines()
         cleaned_lines = [line for line in lines if line.count(",") >= 10]
         csv_data = "\n".join(cleaned_lines)
@@ -18,8 +24,13 @@ def get_realtime_top_stocks(min_turnover=50000000, limit=100):
         df = pd.read_csv(StringIO(csv_data), thousands=",", engine="python", on_bad_lines="skip")
         df.columns = df.columns.str.strip()
 
-        stock_col = [col for col in df.columns if "代號" in col][0]
-        turnover_col = [col for col in df.columns if "成交金額" in col][0]
+        stock_col = next((col for col in df.columns if "代號" in col), None)
+        turnover_col = next((col for col in df.columns if "成交金額" in col), None)
+
+        if not stock_col or not turnover_col:
+            print(f"[price_fetcher] ❌ 找不到必要欄位（代號或成交金額）")
+            print(f"[price_fetcher] 欄位清單：{df.columns.tolist()}")
+            return []
 
         df = df[[stock_col, turnover_col]]
         df.columns = ["stock_id", "turnover"]
