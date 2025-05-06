@@ -1,4 +1,4 @@
-print("[ta_analysis] ✅ 最新測試版本執行中 v1.2 [debug mode]")
+print("[ta_analysis] ✅ 最新修正版 v1.3")
 
 import yfinance as yf
 import pandas as pd
@@ -19,28 +19,31 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
 
     for sid in stock_ids:
         try:
-            print(f"[ta_analysis] 🔍 分析 {sid}")
-            df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False)
+            df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False, group_by="ticker")
             if df.empty or len(df) < 30:
                 continue
 
             df = df.dropna()
-            close = df["Close"]
+            close = df["Close"].iloc[:, 0]
+            low = df["Low"].iloc[:, 0]
+            high = df["High"].iloc[:, 0]
 
-            # 技術指標
+            # --- MACD ---
             ema12 = close.ewm(span=12, adjust=False).mean()
             ema26 = close.ewm(span=26, adjust=False).mean()
             dif = ema12 - ema26
             dea = dif.ewm(span=9, adjust=False).mean()
             macd_hist = dif - dea
 
-            low_min = df["Low"].rolling(window=9).min()
-            high_max = df["High"].rolling(window=9).max()
+            # --- KD ---
+            low_min = low.rolling(window=9).min()
+            high_max = high.rolling(window=9).max()
             denominator = (high_max - low_min).replace(0, np.nan)
             rsv = ((close - low_min) / denominator * 100).fillna(0)
             k = rsv.ewm(com=2).mean()
             d = k.ewm(com=2).mean()
 
+            # --- RSI ---
             delta = close.diff()
             gain = delta.where(delta > 0, 0).rolling(window=14).mean()
             loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
@@ -48,13 +51,10 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
             rsi = 100 - (100 / (1 + rs))
             rsi = rsi.fillna(50)
 
+            # --- MA ---
             ma5 = close.rolling(window=5).mean()
             ma20 = close.rolling(window=20).mean()
             ma60 = close.rolling(window=60).mean()
-
-            # 💥 DEBUG 確認型別
-            print(f"[{sid}] rsi type: {type(rsi)}, close type: {type(close)}")
-            print(f"[{sid}] rsi.iloc[-1]={rsi.iloc[-1]}, close.iloc[-1]={close.iloc[-1]}")
 
             score = 0
             comments = []
