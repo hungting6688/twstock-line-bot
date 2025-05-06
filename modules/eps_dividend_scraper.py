@@ -20,12 +20,11 @@ def get_latest_season():
     return str(year), season
 
 def get_eps_data() -> dict:
-    """
-    從公開資訊觀測站爬取最新季度 EPS 與已公告股利資料（上市公司）
-    """
     year, season = get_latest_season()
 
-    # EPS 來源
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    # EPS
     eps_url = "https://mops.twse.com.tw/mops/web/ajax_t05st09_1"
     eps_form = {
         "encodeURIComponent": "1",
@@ -36,16 +35,20 @@ def get_eps_data() -> dict:
         "year": year,
         "season": season
     }
-    headers = {"User-Agent": "Mozilla/5.0"}
     eps_res = requests.post(eps_url, data=eps_form, headers=headers)
-    eps_df = pd.read_html(eps_res.text)[1]
-    eps_df.columns = eps_df.columns.str.strip()
-    eps_df = eps_df.rename(columns={"公司代號": "stock_id", "基本每股盈餘（元）": "EPS"})
-    eps_df = eps_df[["stock_id", "EPS"]].dropna()
-    eps_df["EPS"] = pd.to_numeric(eps_df["EPS"], errors="coerce")
-    eps_df = eps_df.dropna()
 
-    # 股利來源
+    try:
+        eps_df = pd.read_html(eps_res.text)[1]
+        eps_df.columns = eps_df.columns.str.strip()
+        eps_df = eps_df.rename(columns={"公司代號": "stock_id", "基本每股盈餘（元）": "EPS"})
+        eps_df = eps_df[["stock_id", "EPS"]].dropna()
+        eps_df["EPS"] = pd.to_numeric(eps_df["EPS"], errors="coerce")
+        eps_df = eps_df.dropna()
+    except Exception as e:
+        print(f"[EPS] 查無 EPS 表格或格式錯誤：{e}")
+        eps_df = pd.DataFrame(columns=["stock_id", "EPS"])
+
+    # Dividend
     div_url = "https://mops.twse.com.tw/mops/web/ajax_t05st34"
     div_form = {
         "encodeURIComponent": "1",
@@ -55,14 +58,18 @@ def get_eps_data() -> dict:
         "TYPEK": "sii"
     }
     div_res = requests.post(div_url, data=div_form, headers=headers)
-    div_df = pd.read_html(div_res.text)[1]
-    div_df.columns = div_df.columns.str.strip()
-    div_df = div_df.rename(columns={"公司代號": "stock_id", "現金股利": "Dividend"})
-    div_df = div_df[["stock_id", "Dividend"]].dropna()
-    div_df["Dividend"] = pd.to_numeric(div_df["Dividend"], errors="coerce")
-    div_df = div_df.dropna()
 
-    # 合併
+    try:
+        div_df = pd.read_html(div_res.text)[1]
+        div_df.columns = div_df.columns.str.strip()
+        div_df = div_df.rename(columns={"公司代號": "stock_id", "現金股利": "Dividend"})
+        div_df = div_df[["stock_id", "Dividend"]].dropna()
+        div_df["Dividend"] = pd.to_numeric(div_df["Dividend"], errors="coerce")
+        div_df = div_df.dropna()
+    except Exception as e:
+        print(f"[Dividend] 查無股利表格或格式錯誤：{e}")
+        div_df = pd.DataFrame(columns=["stock_id", "Dividend"])
+
     result = {}
     for _, row in eps_df.iterrows():
         sid = str(row["stock_id"]).zfill(4)
