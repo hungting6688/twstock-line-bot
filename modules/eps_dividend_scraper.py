@@ -1,4 +1,3 @@
-# modules/eps_dividend_scraper.py
 print("[eps_dividend_scraper] ✅ 已載入最新版")
 
 import requests
@@ -38,13 +37,12 @@ def get_eps_data() -> dict:
     }
     eps_res = requests.post(eps_url, data=eps_form, headers=headers)
     try:
-        eps_df = pd.read_html(StringIO(eps_res.text), flavor='bs4')[1]
+        eps_df = pd.read_html(StringIO(eps_res.text))[1]
         eps_df.columns = eps_df.columns.str.strip()
         eps_df = eps_df.rename(columns={"公司代號": "stock_id", "基本每股盈餘（元）": "EPS"})
         eps_df = eps_df[["stock_id", "EPS"]].dropna()
         eps_df["EPS"] = pd.to_numeric(eps_df["EPS"], errors="coerce")
         eps_df = eps_df.dropna()
-        print(f"[EPS] ✅ 成功匯入 EPS 資料筆數：{len(eps_df)}")
     except Exception as e:
         print(f"[EPS] 查無 EPS 表格或格式錯誤：{e}")
         eps_df = pd.DataFrame(columns=["stock_id", "EPS"])
@@ -60,13 +58,12 @@ def get_eps_data() -> dict:
     }
     div_res = requests.post(div_url, data=div_form, headers=headers)
     try:
-        div_df = pd.read_html(StringIO(div_res.text), flavor='bs4')[1]
+        div_df = pd.read_html(StringIO(div_res.text))[1]
         div_df.columns = div_df.columns.str.strip()
         div_df = div_df.rename(columns={"公司代號": "stock_id", "現金股利": "Dividend"})
         div_df = div_df[["stock_id", "Dividend"]].dropna()
         div_df["Dividend"] = pd.to_numeric(div_df["Dividend"], errors="coerce")
         div_df = div_df.dropna()
-        print(f"[Dividend] ✅ 成功匯入股利資料筆數：{len(div_df)}")
     except Exception as e:
         print(f"[Dividend] 查無股利表格或格式錯誤：{e}")
         div_df = pd.DataFrame(columns=["stock_id", "Dividend"])
@@ -84,5 +81,8 @@ def get_eps_data() -> dict:
         if sid not in result:
             result[sid] = {"eps": None, "dividend": None}
         result[sid]["dividend"] = round(row["Dividend"], 2)
+
+    print(f"[EPS] ✅ 成功匯入 EPS 資料筆數：{len(eps_df)}")
+    print(f"[Dividend] ✅ 成功匯入股利資料筆數：{len(div_df)}")
 
     return result
