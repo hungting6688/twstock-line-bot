@@ -1,4 +1,5 @@
 # modules/eps_dividend_scraper.py
+print("[eps_dividend_scraper] ✅ 已載入最新版")
 
 import requests
 import pandas as pd
