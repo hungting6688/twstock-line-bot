@@ -1,14 +1,15 @@
-# signal_analysis.py
+# modules/signal_analysis.py
+
 import pandas as pd
-from ta_analysis import calculate_technical_scores
-from price_fetcher import fetch_price_data
-from eps_dividend_scraper import fetch_eps_dividend_data
-from fundamental_scraper import fetch_fundamental_data
+from modules.ta_analysis import calculate_technical_scores
+from modules.price_fetcher import fetch_price_data
+from modules.eps_dividend_scraper import fetch_eps_dividend_data
+from modules.fundamental_scraper import fetch_fundamental_data
 
 def analyze_stocks_with_signals(min_turnover=50000000, min_score=5):
     print("[signal_analysis] 開始整合分析資料...")
 
-    # Step 1：抓熱門股價與成交金額
+    # Step 1：抓熱門股與成交金額
     price_df = fetch_price_data(min_turnover=min_turnover)
     stock_ids = price_df['stock_id'].tolist()
 
@@ -22,13 +23,13 @@ def analyze_stocks_with_signals(min_turnover=50000000, min_score=5):
     df = price_df.merge(eps_df, on='stock_id', how='left') \
                  .merge(fund_df, on='stock_id', how='left')
 
-    # Step 5：填補缺失
+    # Step 5：填補缺失資料
     df['eps_growth'] = df['eps_growth'].fillna(False)
     df['dividend_yield'] = df['dividend_yield'].fillna(0.0)
     df['ytd_return'] = df['ytd_return'].fillna(0.0)
     df['buy_total'] = df['buy_total'].fillna(0)
 
-    # Step 6：技術指標計算（已內建技術指標邏輯）
+    # Step 6：技術指標與評分分析
     final_df = calculate_technical_scores(df)
 
     # Step 7：推薦排序
