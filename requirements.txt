@@ -4,3 +4,4 @@ yfinance
 lxml
 gspread
 oauth2client
+html5lib
