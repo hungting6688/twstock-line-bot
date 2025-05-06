@@ -1,71 +1,71 @@
 # modules/signal_analysis.py
 
-from modules.price_fetcher import get_top_stocks
 from modules.ta_analysis import analyze_technical_indicators
 from modules.eps_dividend_scraper import get_eps_data
+from modules.price_fetcher import get_top_stocks
+from modules.line_bot import send_line_bot_message
 
 def analyze_stocks_with_signals(
-    mode: str,
     limit: int = 100,
-    min_score: int = 3,
+    min_score: float = 3,
     include_weak: bool = False,
-    filter_type: str = None,
-    stock_ids: list[str] = None
-):
-    if stock_ids is None:
-        stock_ids = get_top_stocks(limit=limit, filter_type=filter_type)
+    filter_type: str = None
+) -> str:
+    print(f"[signal] 開始分析前 {limit} 檔熱門股...")
 
-    price_data = analyze_technical_indicators(stock_ids)
+    # 熱門股清單
+    stock_ids = get_top_stocks(limit=limit, filter_type=filter_type)
+    print(f"[signal] 取得 {len(stock_ids)} 檔股票進行分析")
+
+    # 技術分析
+    stock_results = analyze_technical_indicators(stock_ids)
+    print(f"[signal] 技術分析完成 {len(stock_results)} 檔")
+
+    # 基本面資料
     eps_data = get_eps_data()
 
-    result_lines = []
+    # 推薦與觀察分類
     recommended = []
-    observed = []
-    weak_alerts = []
+    fallback = []
+    for sid, result in stock_results.items():
+        score = result["score"]
+        suggestion = result["suggestion"]
 
-    for sid in stock_ids:
-        pdata = price_data.get(sid)
-        if not pdata:
-            continue
-
-        score = pdata.get("score", 0)
-        comment = pdata.get("suggestion", "")
-        weak = pdata.get("is_weak", False)
         eps_info = eps_data.get(sid, {})
-
+        eps_val = eps_info.get("eps")
+        div_val = eps_info.get("dividend")
         eps_txt = ""
-        if eps_info:
-            eps_val = eps_info.get("eps")
-            div_val = eps_info.get("dividend")
-            if eps_val is not None:
-                eps_txt += f" | EPS: {eps_val}"
-            if div_val is not None:
-                eps_txt += f" / 配息: {div_val}"
+        if eps_val is not None:
+            eps_txt += f" | EPS: {eps_val}"
+        if div_val is not None:
+            eps_txt += f" / 配息: {div_val}"
 
-        line = f"{sid} | Score: {score} | {comment}{eps_txt}"
+        line = f"{sid} | Score: {score} | {suggestion}{eps_txt}"
 
         if score >= min_score:
             recommended.append((score, line))
         else:
-            observed.append((score, line))
+            fallback.append((score, line))
 
-        if include_weak and weak:
-            weak_alerts.append(f"⚠️ {sid} 為極弱股，請留意觀察。")
-
-    recommended.sort(reverse=True)
-    observed.sort(reverse=True)
-
-    result_lines.append(f"📌 分析模式：{mode}")
-
+    # 排序與組裝推播文字
+    lines = []
     if recommended:
-        result_lines.append("✅ 推薦股票：")
-        result_lines.extend([line for _, line in recommended])
+        lines.append("✅ 推薦股票：")
+        for _, line in sorted(recommended, key=lambda x: -x[0])[:5]:
+            lines.append(line)
     else:
-        result_lines.append("（無股票達推薦標準，列出觀察股）")
-        result_lines.extend([line for _, line in observed[:3]])
+        lines.append("（無股票達推薦標準，列出觀察股）")
+        for _, line in sorted(fallback, key=lambda x: -x[0])[:3]:
+            lines.append(line)
 
-    if include_weak and weak_alerts:
-        result_lines.append("\n❗極弱股提示：")
-        result_lines.extend(weak_alerts)
+    # 顯示極弱股
+    if include_weak:
+        weak_lines = []
+        for sid, result in stock_results.items():
+            if result.get("is_weak"):
+                weak_lines.append(f"{sid} | RSI 過低 + 跌破均線，短線轉弱請留意風險。")
+        if weak_lines:
+            lines.append("\n⚠️ 極弱提醒：")
+            lines += weak_lines[:5]
 
-    return "\n".join(result_lines)
+    return "📌 分析模式：intraday\n" + "\n".join(lines)
