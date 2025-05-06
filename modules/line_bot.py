@@ -1,39 +1,34 @@
 # modules/line_bot.py
-import requests
+
 import os
+import requests
 
 print("[line_bot] ✅ 已載入最新版")
 
-def send_line_message(msg: str):
-    token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
-    user_id = os.environ.get("LINE_USER_ID")
+def send_line_message(message: str):
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+    user_id = os.getenv("LINE_USER_ID")
 
     if not token or not user_id:
-        print("[line_bot] ❌ 缺少 LINE TOKEN 或 USER ID，無法推播")
+        print("[line_bot] ❌ 找不到 LINE Token 或 User ID，請確認 Secrets 設定")
         return
 
+    url = "https://api.line.me/v2/bot/message/push"
     headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}"
     }
-
-    payload = {
+    body = {
         "to": user_id,
-        "messages": [{
-            "type": "text",
-            "text": msg
-        }]
+        "messages": [{"type": "text", "text": message}]
     }
 
     try:
-        response = requests.post(
-            "https://api.line.me/v2/bot/message/push",
-            headers=headers,
-            json=payload
-        )
-        if response.status_code == 200:
-            print("[LINE BOT] ✅ 推播成功")
+        res = requests.post(url, headers=headers, json=body)
+        if res.status_code == 200:
+            print("[line_bot] ✅ 訊息成功發送")
         else:
-            print(f"[LINE BOT] ❌ 推播失敗：{response.status_code} - {response.text}")
+            print(f"[line_bot] ❌ 發送失敗，錯誤碼：{res.status_code}")
+            print(res.text)
     except Exception as e:
-        print(f"[LINE BOT] ❌ 發送異常：{e}")
+        print(f"[line_bot] ❌ 發送過程出現錯誤：{e}")
