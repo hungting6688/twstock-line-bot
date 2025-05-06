@@ -2,7 +2,8 @@
 
 import requests
 import pandas as pd
-from bs4 import BeautifulSoup
+from bs4 importBeautifulSoup
+from io import StringIO
 from datetime import datetime
 
 def fetch_price_data(min_turnover=50000000):
@@ -19,13 +20,15 @@ def fetch_price_data(min_turnover=50000000):
         if not tables:
             raise ValueError("無法擷取表格，網站可能變更格式")
 
-        # 通常第 9 或 10 個表格是上市股票交易資訊（包含成交金額）
         df = None
         for table in tables:
-            df_try = pd.read_html(str(table), flavor="bs4")[0]
-            if "證券代號" in df_try.columns and "成交金額(元)" in df_try.columns:
-                df = df_try
-                break
+            try:
+                df_try = pd.read_html(StringIO(str(table)), flavor="bs4")[0]
+                if "證券代號" in df_try.columns and "成交金額(元)" in df_try.columns:
+                    df = df_try
+                    break
+            except:
+                continue
 
         if df is None:
             raise ValueError("找不到包含成交金額的表格")
