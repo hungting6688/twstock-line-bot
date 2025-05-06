@@ -4,6 +4,21 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
+def generate_suggestion_text(score, comments):
+    if score >= 6:
+        prefix = "技術面偏多："
+        suffix = "，建議可考慮分批佈局或短線進場。"
+    elif score >= 4:
+        prefix = "技術面轉強："
+        suffix = "，建議可觀察是否有突破走勢再做進場。"
+    elif score >= 2:
+        prefix = "技術面普通："
+        suffix = "，建議暫不進場，可保守觀望。"
+    else:
+        prefix = "多數技術指標偏弱："
+        suffix = "，建議避開或保守等待轉強訊號。"
+    return prefix + " + ".join(comments) + suffix
+
 def analyze_technical_indicators(stock_ids: list[str]) -> dict:
     results = {}
 
@@ -23,31 +38,30 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
             dea = dif.ewm(span=9, adjust=False).mean()
             macd_hist = dif - dea
 
-            # --- KD (Stochastic Oscillator) ---
+            # --- KD ---
             low_min = df["Low"].rolling(window=9).min()
             high_max = df["High"].rolling(window=9).max()
-            rsv = (close - low_min) / (high_max - low_min) * 100
+            denominator = (high_max - low_min).replace(0, np.nan)
+            rsv = ((close - low_min) / denominator * 100).fillna(0)
             k = rsv.ewm(com=2).mean()
             d = k.ewm(com=2).mean()
 
             # --- RSI ---
             delta = close.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
+            gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+            loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+            rs = gain / loss.replace(0, np.nan)
             rsi = 100 - (100 / (1 + rs))
+            rsi = rsi.fillna(50)
 
             # --- Moving Averages ---
             ma5 = close.rolling(window=5).mean()
             ma20 = close.rolling(window=20).mean()
             ma60 = close.rolling(window=60).mean()
 
-            latest = df.index[-1]
-
             score = 0
             comments = []
 
-            # === Scoring ===
             if macd_hist.iloc[-1] > 0 and dif.iloc[-1] > dea.iloc[-1]:
                 score += 2
                 comments.append("MACD 剛翻多")
@@ -71,17 +85,18 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
             if close.iloc[-1] < ma20.iloc[-1] and rsi.iloc[-1] < 40:
                 comments.append("中期偏弱")
 
-            # === Weak detection ===
             is_weak = (
-                rsi.iloc[-1] < 30
-                and close.iloc[-1] < ma5.iloc[-1]
-                and close.iloc[-1] < ma20.iloc[-1]
-                and close.iloc[-1] < ma60.iloc[-1]
+                rsi.iloc[-1] < 30 and
+                close.iloc[-1] < ma5.iloc[-1] and
+                close.iloc[-1] < ma20.iloc[-1] and
+                close.iloc[-1] < ma60.iloc[-1]
             )
+
+            suggestion = generate_suggestion_text(score, comments)
 
             results[sid] = {
                 "score": round(score, 2),
-                "suggestion": " + ".join(comments),
+                "suggestion": suggestion,
                 "is_weak": is_weak
             }
 
