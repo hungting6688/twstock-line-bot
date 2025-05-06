@@ -1,4 +1,4 @@
-print("[ta_analysis] ✅ 最新修正版 v1.3")
+print("[ta_analysis] ✅ 最新修正版 v1.4")
 
 import yfinance as yf
 import pandas as pd
@@ -19,14 +19,15 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
 
     for sid in stock_ids:
         try:
-            df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False, group_by="ticker")
+            print(f"[ta_analysis] 🔍 分析 {sid}")
+            df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False)
             if df.empty or len(df) < 30:
                 continue
 
             df = df.dropna()
-            close = df["Close"].iloc[:, 0]
-            low = df["Low"].iloc[:, 0]
-            high = df["High"].iloc[:, 0]
+            close = df["Close"]
+            low = df["Low"]
+            high = df["High"]
 
             # --- MACD ---
             ema12 = close.ewm(span=12, adjust=False).mean()
