@@ -1,4 +1,6 @@
-print("[ta_analysis] ✅ 最新修正版 v1.5 (Series 強制轉換)")
+# modules/ta_analysis.py
+
+print("[ta_analysis] ✅ 最新修正版 v1.6 (支援權重策略)")
 
 import yfinance as yf
 import pandas as pd
@@ -6,31 +8,30 @@ import numpy as np
 
 def generate_suggestion_text(score, comments):
     if score >= 6:
-        return "技術面偏多：" + " + ".join(comments) + "，建議可考慮分批佈局或短線進場。"
+        prefix = "技術面偏多："
+        suffix = "，建議可考慮分批佈局或短線進場。"
     elif score >= 4:
-        return "技術面轉強：" + " + ".join(comments) + "，建議可觀察是否有突破走勢再做進場。"
+        prefix = "技術面轉強："
+        suffix = "，建議可觀察是否有突破走勢再做進場。"
     elif score >= 2:
-        return "技術面普通：" + " + ".join(comments) + "，建議暫不進場，可保守觀望。"
+        prefix = "技術面普通："
+        suffix = "，建議暫不進場，可保守觀望。"
     else:
-        return "多數技術指標偏弱：" + " + ".join(comments) + "，建議避開或保守等待轉強訊號。"
+        prefix = "多數技術指標偏弱："
+        suffix = "，建議避開或保守等待轉強訊號。"
+    return prefix + " + ".join(comments) + suffix
 
-def analyze_technical_indicators(stock_ids: list[str]) -> dict:
+def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_data: dict = {}) -> dict:
     results = {}
 
     for sid in stock_ids:
         try:
-            print(f"[ta_analysis] 🔍 分析 {sid}")
             df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False)
-
             if df.empty or len(df) < 30:
                 continue
 
             df = df.dropna()
-
-            # 強制取第一欄為 Series，避免 DataFrame 導致 ambiguous 錯誤
-            close = df["Close"].squeeze()
-            low = df["Low"].squeeze()
-            high = df["High"].squeeze()
+            close = df["Close"]
 
             # --- MACD ---
             ema12 = close.ewm(span=12, adjust=False).mean()
@@ -40,8 +41,8 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
             macd_hist = dif - dea
 
             # --- KD ---
-            low_min = low.rolling(window=9).min()
-            high_max = high.rolling(window=9).max()
+            low_min = df["Low"].rolling(window=9).min()
+            high_max = df["High"].rolling(window=9).max()
             denominator = (high_max - low_min).replace(0, np.nan)
             rsv = ((close - low_min) / denominator * 100).fillna(0)
             k = rsv.ewm(com=2).mean()
@@ -55,7 +56,7 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
             rsi = 100 - (100 / (1 + rs))
             rsi = rsi.fillna(50)
 
-            # --- MA ---
+            # --- 均線 ---
             ma5 = close.rolling(window=5).mean()
             ma20 = close.rolling(window=20).mean()
             ma60 = close.rolling(window=60).mean()
@@ -63,28 +64,36 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
             score = 0
             comments = []
 
-            if macd_hist.iloc[-1] > 0 and dif.iloc[-1] > dea.iloc[-1]:
-                score += 2
+            if indicators.get("macd", 0) > 0 and macd_hist.iloc[-1] > 0 and dif.iloc[-1] > dea.iloc[-1]:
+                score += indicators["macd"]
                 comments.append("MACD 剛翻多")
 
-            if k.iloc[-1] > d.iloc[-1] and k.iloc[-1] < 60:
-                score += 1.5
+            if indicators.get("kd", 0) > 0 and k.iloc[-1] > d.iloc[-1] and k.iloc[-1] < 60:
+                score += indicators["kd"]
                 comments.append("KD 黃金交叉")
 
-            if rsi.iloc[-1] < 30:
-                score += 1
+            if indicators.get("rsi", 0) > 0 and rsi.iloc[-1] < 30:
+                score += indicators["rsi"]
                 comments.append("RSI 超跌")
 
-            if close.iloc[-1] > ma5.iloc[-1]:
-                score += 1
-                comments.append("站上 5 日均線")
-
-            if close.iloc[-1] > ma20.iloc[-1]:
-                score += 1
-                comments.append("站上 20 日均線")
+            if indicators.get("ma", 0) > 0:
+                if close.iloc[-1] > ma5.iloc[-1]:
+                    score += indicators["ma"] * 0.5
+                    comments.append("站上 5 日均線")
+                if close.iloc[-1] > ma20.iloc[-1]:
+                    score += indicators["ma"] * 0.5
+                    comments.append("站上 20 日均線")
 
             if close.iloc[-1] < ma20.iloc[-1] and rsi.iloc[-1] < 40:
                 comments.append("中期偏弱")
+
+            if indicators.get("eps", 0) > 0 and sid in eps_data and eps_data[sid]["eps"] and eps_data[sid]["eps"] >= 2:
+                score += indicators["eps"]
+                comments.append(f"EPS 穩定（{eps_data[sid]['eps']}）")
+
+            if indicators.get("dividend", 0) > 0 and sid in eps_data and eps_data[sid]["dividend"] and eps_data[sid]["dividend"] >= 2:
+                score += indicators["dividend"]
+                comments.append(f"殖利率佳（{eps_data[sid]['dividend']}）")
 
             is_weak = (
                 rsi.iloc[-1] < 30 and
@@ -102,7 +111,7 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
             }
 
         except Exception as e:
-            print(f"[ta_analysis] ❌ {sid} 分析失敗：{e}")
+            print(f"[ta_analysis] {sid} 分析失敗：{e}")
             continue
 
     return results
