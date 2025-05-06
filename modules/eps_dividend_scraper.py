@@ -1,18 +1,20 @@
-# eps_dividend_scraper.py
+# modules/eps_dividend_scraper.py
+
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 
-def fetch_eps_dividend_data(stock_ids, limit=20):  # 限制最多分析幾檔，避免爬蟲過慢
-    print(f"[eps_dividend_scraper] 擷取 EPS / 殖利率 / YTD（最多 {limit} 檔）...")
+def fetch_eps_dividend_data(stock_ids, limit=20):
+    print(f"[eps_dividend_scraper] 開始擷取 EPS / 殖利率 / YTD（最多 {limit} 檔）...")
 
     result = []
+
     for i, stock_id in enumerate(stock_ids[:limit]):
-        print(f"[eps_dividend_scraper] 處理第 {i+1} 檔：{stock_id}")
+        print(f"[eps_dividend_scraper] 第 {i+1} 檔：{stock_id}")
         try:
             url = f'https://mops.twse.com.tw/mops/web/ajax_t05st09?encodeURIComponent=1&step=1&firstin=1&off=1&keyword4={stock_id}'
             headers = { "User-Agent": "Mozilla/5.0" }
-            resp = requests.get(url, headers=headers, timeout=10)  # 加 timeout
+            resp = requests.get(url, headers=headers, timeout=10)  # 加 timeout 避免卡住
             soup = BeautifulSoup(resp.text, "html.parser")
             tables = soup.find_all("table")
 
@@ -20,6 +22,7 @@ def fetch_eps_dividend_data(stock_ids, limit=20):  # 限制最多分析幾檔，
             dividend_yield = 0.0
             ytd_return = 0.0
 
+            # 嘗試擷取 EPS 資料
             if len(tables) >= 2:
                 rows = tables[1].find_all("tr")
                 eps_values = []
@@ -34,7 +37,7 @@ def fetch_eps_dividend_data(stock_ids, limit=20):  # 限制最多分析幾檔，
                 if len(eps_values) >= 2 and eps_values[-1] > eps_values[-2]:
                     eps_growth = True
 
-            # 模擬用假資料（後續可接真 API）
+            # 模擬殖利率與 YTD（未來可接正式資料）
             dividend_yield = round(2 + (int(stock_id[-1]) % 3), 2)
             ytd_return = round((int(stock_id[-2:]) % 20 - 10) / 10, 2)
 
@@ -46,7 +49,7 @@ def fetch_eps_dividend_data(stock_ids, limit=20):  # 限制最多分析幾檔，
             })
 
         except Exception as e:
-            print(f"[eps_dividend_scraper] ❌ 無法處理 {stock_id}: {e}")
+            print(f"[eps_dividend_scraper] ❌ 擷取失敗：{stock_id} → {e}")
 
     df = pd.DataFrame(result)
     print(f"[eps_dividend_scraper] ✅ 擷取完成，共 {len(df)} 檔")
