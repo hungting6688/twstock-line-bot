@@ -33,7 +33,16 @@ def analyze_stocks_with_signals(
         weak = pdata.get("is_weak", False)
         eps_info = eps_data.get(sid, {})
 
-        line = f"{sid} | Score: {score} | {comment}"
+        eps_txt = ""
+        if eps_info:
+            eps_val = eps_info.get("eps")
+            div_val = eps_info.get("dividend")
+            if eps_val is not None:
+                eps_txt += f" | EPS: {eps_val}"
+            if div_val is not None:
+                eps_txt += f" / 配息: {div_val}"
+
+        line = f"{sid} | Score: {score} | {comment}{eps_txt}"
 
         if score >= min_score:
             recommended.append((score, line))
