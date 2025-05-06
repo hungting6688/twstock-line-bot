@@ -1,53 +1,62 @@
-from modules.ta_analysis import analyze_signals
-from modules.price_fetcher import fetch_price_data
-from modules.stock_data_utils import get_all_stock_ids
-from datetime import datetime
+# modules/signal_analysis.py
 
-def analyze_stocks_with_signals(date: str, limit: int = 100, min_score: float = 2.0, filter_type: str = "all", include_weak: bool = False) -> str:
-    stock_ids = get_all_stock_ids(limit=limit, filter_type=filter_type)
-    results = []
+from modules.price_fetcher import get_top_stocks
+from modules.ta_analysis import analyze_technical_indicators
+from modules.eps_dividend_scraper import get_eps_data
 
-    for stock_id in stock_ids:
-        try:
-            df = fetch_price_data(stock_id)
-            if df is None or df.empty:
-                continue
-            info = analyze_signals(df.iloc[-1])
-            results.append({
-                "stock_id": stock_id,
-                "score": info["score"],
-                "reasons": info["reasons"],
-                "suggestions": info["suggestions"]
-            })
-        except Exception as e:
+def analyze_stocks_with_signals(
+    mode: str,
+    limit: int = 100,
+    min_score: int = 3,
+    include_weak: bool = False,
+    filter_type: str = None,
+    stock_ids: list[str] = None  # 保留參數
+):
+    if stock_ids is None:
+        stock_ids = get_top_stocks(limit=limit, filter_type=filter_type)
+
+    price_data = analyze_technical_indicators(stock_ids)
+    eps_data = get_eps_data()
+
+    result_lines = []
+    recommended = []
+    observed = []
+    weak_alerts = []
+
+    for sid in stock_ids:
+        if sid not in price_data:
             continue
 
-    if not results:
-        return f"***title***\n⚠️ 今日無法取得任何分析資料。"
+        pdata = price_data[sid]
+        eps_info = eps_data.get(sid, {})
 
-    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
-    good = [r for r in sorted_results if r["score"] >= min_score]
-    weak = [r for r in sorted_results if r["score"] <= -2.5] if include_weak else []
+        score = pdata.get("score", 0)
+        comment = pdata.get("suggestion", "")
+        weak = pdata.get("is_weak", False)
 
-    msg = "***title***\n"
+        line = f"{sid} | Score: {score} | {comment}"
 
-    if good:
-        msg += "\n📈 推薦股：\n"
-        for item in good:
-            msg += f"🔹 {item['stock_id']}（分數 {item['score']}）\n"
-            msg += f"   {'；'.join(item['reasons'])}\n"
+        if score >= min_score:
+            recommended.append((score, line))
+        else:
+            observed.append((score, line))
 
+        if include_weak and weak:
+            weak_alerts.append(f"⚠️ {sid} 被視為極弱股，請留意。")
+
+    recommended.sort(reverse=True)
+    observed.sort(reverse=True)
+
+    result_lines.append(f"📌 分析模式：{mode}")
+    if recommended:
+        result_lines.append("✅ 推薦股票：")
+        result_lines.extend([line for _, line in recommended])
     else:
-        fallback = sorted_results[:3]
-        msg += "\n📌 無符合推薦門檻的股票，供觀察：\n"
-        for item in fallback:
-            msg += f"🔸 {item['stock_id']}（分數 {item['score']}）\n"
-            msg += f"   {'；'.join(item['reasons'])}\n"
+        result_lines.append("（無股票達推薦標準，列出觀察股）")
+        result_lines.extend([line for _, line in observed[:3]])
 
-    if weak:
-        msg += "\n⚠️ 極弱股提醒：\n"
-        for item in weak[:3]:
-            msg += f"🔻 {item['stock_id']}（分數 {item['score']}）\n"
-            msg += f"   {'；'.join(item['reasons'])}\n"
+    if include_weak and weak_alerts:
+        result_lines.append("\n❗極弱股提示：")
+        result_lines.extend(weak_alerts)
 
-    return msg.strip()
+    return "\n".join(result_lines)
