@@ -1,4 +1,5 @@
-print("[ta_analysis] ✅ 已載入最新版")
+print("[ta_analysis] ✅ 最新測試版本執行中 v1.1")
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
