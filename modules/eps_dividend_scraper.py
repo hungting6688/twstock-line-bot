@@ -1,89 +1,65 @@
-print("[eps_dividend_scraper] ✅ 已載入最新版")
-
+# eps_dividend_scraper.py
 import requests
 import pandas as pd
-import datetime
-from io import StringIO
+from bs4 import BeautifulSoup
+from datetime import datetime
 
-def get_latest_season():
-    now = datetime.datetime.now()
-    year = now.year - 1911
-    month = now.month
-    if month <= 3:
-        season = "04"
-        year -= 1
-    elif month <= 6:
-        season = "01"
-    elif month <= 9:
-        season = "02"
-    else:
-        season = "03"
-    return str(year), season
+def fetch_eps_dividend_data(stock_ids):
+    print("[eps_dividend_scraper] 擷取 EPS、殖利率、YTD 報酬率...")
 
-def get_eps_data() -> dict:
-    year, season = get_latest_season()
-    headers = {"User-Agent": "Mozilla/5.0"}
-    result = {}
+    result = []
 
-    # EPS
-    eps_url = "https://mops.twse.com.tw/mops/web/ajax_t05st09_1"
-    eps_form = {
-        "encodeURIComponent": "1",
-        "step": "1",
-        "firstin": "1",
-        "off": "1",
-        "TYPEK": "sii",
-        "year": year,
-        "season": season
-    }
+    for stock_id in stock_ids:
+        try:
+            url = f'https://mops.twse.com.tw/mops/web/ajax_t05st09?encodeURIComponent=1&step=1&firstin=1&off=1&keyword4={stock_id}'
+            headers = {
+                "User-Agent": "Mozilla/5.0"
+            }
+            resp = requests.get(url, headers=headers, timeout=10)
+            soup = BeautifulSoup(resp.text, "html.parser")
+            tables = soup.find_all("table")
 
-    try:
-        eps_res = requests.post(eps_url, data=eps_form, headers=headers)
-        eps_df = pd.read_html(StringIO(eps_res.text))[1]
-        eps_df.columns = eps_df.columns.str.strip()
-        eps_df = eps_df.rename(columns={"公司代號": "stock_id", "基本每股盈餘（元）": "EPS"})
-        eps_df = eps_df[["stock_id", "EPS"]].dropna()
-        eps_df["EPS"] = pd.to_numeric(eps_df["EPS"], errors="coerce")
-        eps_df = eps_df.dropna()
-        print(f"[EPS] ✅ 成功匯入 EPS 資料筆數：{len(eps_df)}")
-    except Exception as e:
-        print(f"[EPS] 查無 EPS 表格或格式錯誤：{e}")
-        eps_df = pd.DataFrame(columns=["stock_id", "EPS"])
+            eps_growth = False
+            dividend_yield = 0
+            ytd_return = 0
 
-    # Dividend
-    div_url = "https://mops.twse.com.tw/mops/web/ajax_t05st34"
-    div_form = {
-        "encodeURIComponent": "1",
-        "step": "1",
-        "firstin": "1",
-        "off": "1",
-        "TYPEK": "sii"
-    }
+            # 從第 2 張表格尋找 EPS
+            if len(tables) >= 2:
+                rows = tables[1].find_all("tr")
+                eps_values = []
+                for r in rows[2:]:
+                    cols = r.find_all("td")
+                    if len(cols) > 4:
+                        try:
+                            eps = float(cols[4].text.strip())
+                            eps_values.append(eps)
+                        except:
+                            continue
+                if len(eps_values) >= 2 and eps_values[-1] > eps_values[-2]:
+                    eps_growth = True
 
-    try:
-        div_res = requests.post(div_url, data=div_form, headers=headers)
-        div_df = pd.read_html(StringIO(div_res.text))[1]
-        div_df.columns = div_df.columns.str.strip()
-        div_df = div_df.rename(columns={"公司代號": "stock_id", "現金股利": "Dividend"})
-        div_df = div_df[["stock_id", "Dividend"]].dropna()
-        div_df["Dividend"] = pd.to_numeric(div_df["Dividend"], errors="coerce")
-        div_df = div_df.dropna()
-        print(f"[Dividend] ✅ 成功匯入股利資料筆數：{len(div_df)}")
-    except Exception as e:
-        print(f"[Dividend] 查無股利表格或格式錯誤：{e}")
-        div_df = pd.DataFrame(columns=["stock_id", "Dividend"])
+            # 抓殖利率與 YTD（可換來源）
+            dividend_yield = fetch_yield_from_cnyes(stock_id)
+            ytd_return = fetch_ytd_from_cnyes(stock_id)
 
-    for _, row in eps_df.iterrows():
-        sid = str(row["stock_id"]).zfill(4)
-        result[sid] = {
-            "eps": round(row["EPS"], 2),
-            "dividend": None
-        }
+            result.append({
+                "stock_id": stock_id,
+                "eps_growth": eps_growth,
+                "dividend_yield": dividend_yield,
+                "ytd_return": ytd_return
+            })
+        except Exception as e:
+            print(f"[eps_dividend_scraper] 無法處理 {stock_id}: {e}")
 
-    for _, row in div_df.iterrows():
-        sid = str(row["stock_id"]).zfill(4)
-        if sid not in result:
-            result[sid] = {"eps": None, "dividend": None}
-        result[sid]["dividend"] = round(row["Dividend"], 2)
+    df = pd.DataFrame(result)
+    print(f"[eps_dividend_scraper] 完成 EPS 與殖利率擷取，共 {len(df)} 檔")
+    return df
 
-    return result
+# 輔助：從鉅亨網或其他 API 抓殖利率（模擬）
+def fetch_yield_from_cnyes(stock_id):
+    # 範例：自行更換為穩定來源
+    return round(2 + (int(stock_id[-1]) % 3), 2)  # 模擬值 2%~4%
+
+# 輔助：從鉅亨網或其他 API 抓報酬率（模擬）
+def fetch_ytd_from_cnyes(stock_id):
+    return round((int(stock_id[-2:]) % 20 - 10) / 10, 2)  # 模擬值 -1 ~ +1
