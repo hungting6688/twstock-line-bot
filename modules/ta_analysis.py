@@ -1,94 +1,72 @@
-# modules/ta_analysis.py
-
+# ta_analysis.py
 import pandas as pd
 import numpy as np
 
-def analyze_technical_indicators(df, stock_id=None, weights=None):
-    print(f"[ta_analysis] 分析中：{stock_id}")
-    score = 0
-    signals = []
-    suggestions = []
+def calculate_technical_scores(df):
+    result = []
+    
+    for _, row in df.iterrows():
+        score = 0
+        reasons = []
+        suggestion = "建議觀察"
 
-    try:
-        # 移動平均線
-        ma5 = df['Close'].rolling(window=5).mean()
-        ma20 = df['Close'].rolling(window=20).mean()
-        if ma5.iloc[-1] > ma20.iloc[-1]:
-            score += weights.get("ma", 0)
-            signals.append("短期均線多頭")
+        # MACD 黃金交叉
+        if row.get("macd_hist", 0) > 0 and row.get("macd", 0) > row.get("signal", 0):
+            score += 2.0
+            reasons.append("MACD黃金交叉")
+
+        # KD 黃金交叉且低檔
+        if row.get("kdj_k", 0) > row.get("kdj_d", 0) and row.get("kdj_k", 0) < 40:
+            score += 2.0
+            reasons.append("KD黃金交叉")
+
+        # RSI 上升且大於 50
+        if row.get("rsi_14", 0) > 50 and row.get("rsi_14", 0) > row.get("rsi_14_prev", 0):
+            score += 1.5
+            reasons.append("RSI走強")
+
+        # 股價高於均線
+        ma_list = [row.get("close", 0) > row.get(f"ma{i}", 0) for i in [5, 20, 60]]
+        if all(ma_list):
+            score += 2.0
+            reasons.append("站上均線")
+
+        # 布林通道：突破中線向上
+        if row.get("close", 0) > row.get("bb_middle", 0):
+            score += 1.5
+            reasons.append("布林中線上揚")
+
+        # 法人籌碼
+        if row.get("buy_total", 0) > 0:
+            score += 0.5
+            reasons.append("法人買超")
+
+        # EPS 成長
+        if row.get("eps_growth", False):
+            score += 0.5
+            reasons.append("EPS成長")
+
+        # 殖利率 + 報酬率
+        if row.get("dividend_yield", 0) >= 3 and row.get("ytd_return", 0) > 0:
+            score += 0.5
+            reasons.append("高殖利率")
+
+        # 白話建議
+        if score >= 7:
+            suggestion = "建議立即列入關注清單"
+        elif score >= 5:
+            suggestion = "建議密切觀察"
+        elif score >= 3:
+            suggestion = "建議暫不進場"
         else:
-            suggestions.append("短期均線未上穿")
+            suggestion = "不建議操作"
 
-        # MACD
-        ema12 = df['Close'].ewm(span=12, adjust=False).mean()
-        ema26 = df['Close'].ewm(span=26, adjust=False).mean()
-        macd = ema12 - ema26
-        signal = macd.ewm(span=9, adjust=False).mean()
-        if macd.iloc[-1] > signal.iloc[-1]:
-            score += weights.get("macd", 0)
-            signals.append("MACD 黃金交叉")
-        else:
-            suggestions.append("MACD 尚未交叉")
-
-        # KD 指標
-        low_min = df['Low'].rolling(window=9).min()
-        high_max = df['High'].rolling(window=9).max()
-        rsv = (df['Close'] - low_min) / (high_max - low_min) * 100
-        k = rsv.ewm(com=2).mean()
-        d = k.ewm(com=2).mean()
-        if k.iloc[-1] > d.iloc[-1] and k.iloc[-1] < 80:
-            score += weights.get("kd", 0)
-            signals.append("KD 黃金交叉")
-        else:
-            suggestions.append("KD 未交叉或過熱")
-
-        # RSI
-        delta = df['Close'].diff()
-        up = delta.clip(lower=0)
-        down = -delta.clip(upper=0)
-        avg_gain = up.rolling(window=14).mean()
-        avg_loss = down.rolling(window=14).mean()
-        rs = avg_gain / (avg_loss + 1e-9)
-        rsi = 100 - (100 / (1 + rs))
-        if rsi.iloc[-1] < 30:
-            suggestions.append("RSI 過低，可能超跌")
-        elif rsi.iloc[-1] > 70:
-            suggestions.append("RSI 過高，可能超買")
-        else:
-            score += weights.get("rsi", 0)
-            signals.append("RSI 穩定區間")
-
-        # 布林通道
-        mid = df['Close'].rolling(window=20).mean()
-        std = df['Close'].rolling(window=20).std()
-        upper = mid + 2 * std
-        lower = mid - 2 * std
-        if df['Close'].iloc[-1] < lower.iloc[-1]:
-            suggestions.append("跌破布林下緣，可能反彈")
-        elif df['Close'].iloc[-1] > upper.iloc[-1]:
-            suggestions.append("突破布林上緣，注意拉回")
-        else:
-            score += weights.get("boll", 0)
-            signals.append("布林通道穩定")
-
-        # 白話建議邏輯
-        if score >= 5:
-            advice = "建議立即列入關注清單"
-        elif score >= 3.5:
-            advice = "建議密切觀察"
-        elif score >= 2:
-            advice = "建議暫不進場"
-        else:
-            advice = "不建議操作"
-
-        return {
-            "stock_id": stock_id,
+        result.append({
+            "stock_id": row["stock_id"],
+            "stock_name": row.get("stock_name", ""),
             "score": round(score, 2),
-            "signals": signals,
-            "suggestions": suggestions,
-            "advice": advice
-        }
-
-    except Exception as e:
-        print(f"[ta_analysis] {stock_id} 分析失敗：{e}")
-        return None
+            "reasons": "、".join(reasons),
+            "suggestion": suggestion
+        })
+    
+    return pd.DataFrame(result)
