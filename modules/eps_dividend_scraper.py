@@ -24,8 +24,9 @@ def get_latest_season():
 def get_eps_data() -> dict:
     year, season = get_latest_season()
     headers = {"User-Agent": "Mozilla/5.0"}
+    result = {}
 
-    # EPS
+    # --- EPS 抓取 ---
     eps_url = "https://mops.twse.com.tw/mops/web/ajax_t05st09_1"
     eps_form = {
         "encodeURIComponent": "1",
@@ -37,8 +38,10 @@ def get_eps_data() -> dict:
         "season": season
     }
     eps_res = requests.post(eps_url, data=eps_form, headers=headers)
+
     try:
-        eps_df = pd.read_html(StringIO(eps_res.text))[1]
+        eps_tables = pd.read_html(StringIO(eps_res.text))
+        eps_df = next(df for df in eps_tables if "公司代號" in df.columns and "基本每股盈餘（元）" in df.columns)
         eps_df.columns = eps_df.columns.str.strip()
         eps_df = eps_df.rename(columns={"公司代號": "stock_id", "基本每股盈餘（元）": "EPS"})
         eps_df = eps_df[["stock_id", "EPS"]].dropna()
@@ -48,7 +51,7 @@ def get_eps_data() -> dict:
         print(f"[EPS] 查無 EPS 表格或格式錯誤：{e}")
         eps_df = pd.DataFrame(columns=["stock_id", "EPS"])
 
-    # Dividend
+    # --- Dividend 抓取 ---
     div_url = "https://mops.twse.com.tw/mops/web/ajax_t05st34"
     div_form = {
         "encodeURIComponent": "1",
@@ -58,8 +61,10 @@ def get_eps_data() -> dict:
         "TYPEK": "sii"
     }
     div_res = requests.post(div_url, data=div_form, headers=headers)
+
     try:
-        div_df = pd.read_html(StringIO(div_res.text))[1]
+        div_tables = pd.read_html(StringIO(div_res.text))
+        div_df = next(df for df in div_tables if "公司代號" in df.columns and "現金股利" in df.columns)
         div_df.columns = div_df.columns.str.strip()
         div_df = div_df.rename(columns={"公司代號": "stock_id", "現金股利": "Dividend"})
         div_df = div_df[["stock_id", "Dividend"]].dropna()
@@ -69,13 +74,10 @@ def get_eps_data() -> dict:
         print(f"[Dividend] 查無股利表格或格式錯誤：{e}")
         div_df = pd.DataFrame(columns=["stock_id", "Dividend"])
 
-    result = {}
+    # --- 整合結果 ---
     for _, row in eps_df.iterrows():
         sid = str(row["stock_id"]).zfill(4)
-        result[sid] = {
-            "eps": round(row["EPS"], 2),
-            "dividend": None
-        }
+        result[sid] = {"eps": round(row["EPS"], 2), "dividend": None}
 
     for _, row in div_df.iterrows():
         sid = str(row["stock_id"]).zfill(4)
@@ -83,4 +85,6 @@ def get_eps_data() -> dict:
             result[sid] = {"eps": None, "dividend": None}
         result[sid]["dividend"] = round(row["Dividend"], 2)
 
+    print(f"[EPS] ✅ 成功匯入 EPS 資料筆數：{len(eps_df)}")
+    print(f"[Dividend] ✅ 成功匯入股利資料筆數：{len(div_df)}")
     return result
