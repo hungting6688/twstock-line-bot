@@ -1,14 +1,15 @@
 # modules/line_bot.py
-
-import os
 import requests
+import os
 
-def send_line_bot_message(msg: str):
+print("[line_bot] ✅ 已載入最新版")
+
+def send_line_message(msg: str):
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     user_id = os.environ.get("LINE_USER_ID")
 
     if not token or not user_id:
-        print("[line_bot] ❌ 找不到 LINE Token 或 User ID")
+        print("[line_bot] ❌ 缺少 LINE TOKEN 或 USER ID，無法推播")
         return
 
     headers = {
@@ -16,7 +17,7 @@ def send_line_bot_message(msg: str):
         "Content-Type": "application/json"
     }
 
-    body = {
+    payload = {
         "to": user_id,
         "messages": [{
             "type": "text",
@@ -24,13 +25,15 @@ def send_line_bot_message(msg: str):
         }]
     }
 
-    response = requests.post(
-        "https://api.line.me/v2/bot/message/push",
-        headers=headers,
-        json=body
-    )
-
-    if response.status_code == 200:
-        print("[line_bot] ✅ 訊息發送成功")
-    else:
-        print(f"[line_bot] ❌ 發送失敗：{response.text}")
+    try:
+        response = requests.post(
+            "https://api.line.me/v2/bot/message/push",
+            headers=headers,
+            json=payload
+        )
+        if response.status_code == 200:
+            print("[LINE BOT] ✅ 推播成功")
+        else:
+            print(f"[LINE BOT] ❌ 推播失敗：{response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"[LINE BOT] ❌ 發送異常：{e}")
