@@ -60,3 +60,6 @@ def get_strategy(mode: str):
 
 # ✅ 提供給其他模組使用的名稱
 STRATEGY_CONFIGS = strategy_profiles
+
+# ✅ 補上 default 策略，避免其他模組報錯
+STRATEGY_CONFIGS["default"] = STRATEGY_CONFIGS["opening"]
