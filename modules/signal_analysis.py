@@ -10,7 +10,7 @@ def analyze_stocks_with_signals(
     min_score: int = 3,
     include_weak: bool = False,
     filter_type: str = None,
-    stock_ids: list[str] = None  # 保留參數
+    stock_ids: list[str] = None
 ):
     if stock_ids is None:
         stock_ids = get_top_stocks(limit=limit, filter_type=filter_type)
@@ -22,6 +22,8 @@ def analyze_stocks_with_signals(
     recommended = []
     observed = []
     weak_alerts = []
+
+    print(f"[debug] 分析股票數量：{len(stock_ids)}，成功取得技術分析資料數：{len(price_data)}")
 
     for sid in stock_ids:
         if sid not in price_data:
@@ -35,6 +37,7 @@ def analyze_stocks_with_signals(
         weak = pdata.get("is_weak", False)
 
         line = f"{sid} | Score: {score} | {comment}"
+        print(f"[debug] {sid} 分數：{score}, 建議：{comment}")
 
         if score >= min_score:
             recommended.append((score, line))
