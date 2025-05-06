@@ -57,3 +57,6 @@ strategy_profiles = {
 
 def get_strategy(mode: str):
     return strategy_profiles.get(mode, strategy_profiles["opening"])
+
+# ✅ 提供給其他模組使用的名稱
+STRATEGY_CONFIGS = strategy_profiles
