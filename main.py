@@ -11,6 +11,7 @@ from modules.line_bot import send_line_message
 
 def main(mode: str):
     print(f"[main] 分析模式：{mode}")
+    
     if mode == "opening":
         msg = analyze_opening()
     elif mode == "intraday":
@@ -23,8 +24,12 @@ def main(mode: str):
         print("❌ 不支援的模式，請使用 --mode=[opening|intraday|dividend|closing]")
         return
 
-    send_line_message(msg)
-    print("[LINE BOT] ✅ 推播成功")
+    # 推播訊息（文字）
+    if msg:
+        send_line_message(msg)
+        print("[LINE BOT] ✅ 推播成功")
+    else:
+        print("[main] ⚠️ 無推播內容")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
