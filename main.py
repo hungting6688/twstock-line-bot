@@ -1,19 +1,22 @@
-# main.py
-
 from modules.run_opening import analyze_opening
-from modules.line_bot import send_line_bot_message  # ✅ 新增推播功能
+from modules.intraday_monitor import analyze_intraday  # ✅ 加這行
+from modules.dividend import analyze_dividend
+from modules.closing_summary import analyze_closing
 
-def main(mode):
+def main(mode: str):
+    print(f"[main] 分析模式：{mode}")
     if mode == "opening":
         msg = analyze_opening()
-        print("[main] 分析結果如下：\n", msg)
-        send_line_bot_message(message=msg)  # ✅ 實際推播
+    elif mode == "intraday":
+        msg = analyze_intraday()  # ✅ 加這行
+    elif mode == "dividend":
+        msg = analyze_dividend()
+    elif mode == "closing":
+        msg = analyze_closing()
     else:
-        print("不支援的模式")
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, required=True)
-    args = parser.parse_args()
-    main(args.mode)
+        print("不支援的模式.並且無推播通知")
+        return
+    
+    from modules.line_bot import send_line_bot_message
+    send_line_bot_message(msg)
+    print("[LINE BOT] ✅ 推播成功")
