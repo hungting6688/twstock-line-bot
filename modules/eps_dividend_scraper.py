@@ -2,28 +2,24 @@
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
-from datetime import datetime
 
-def fetch_eps_dividend_data(stock_ids):
-    print("[eps_dividend_scraper] 擷取 EPS、殖利率、YTD 報酬率...")
+def fetch_eps_dividend_data(stock_ids, limit=20):  # 限制最多分析幾檔，避免爬蟲過慢
+    print(f"[eps_dividend_scraper] 擷取 EPS / 殖利率 / YTD（最多 {limit} 檔）...")
 
     result = []
-
-    for stock_id in stock_ids:
+    for i, stock_id in enumerate(stock_ids[:limit]):
+        print(f"[eps_dividend_scraper] 處理第 {i+1} 檔：{stock_id}")
         try:
             url = f'https://mops.twse.com.tw/mops/web/ajax_t05st09?encodeURIComponent=1&step=1&firstin=1&off=1&keyword4={stock_id}'
-            headers = {
-                "User-Agent": "Mozilla/5.0"
-            }
-            resp = requests.get(url, headers=headers, timeout=10)
+            headers = { "User-Agent": "Mozilla/5.0" }
+            resp = requests.get(url, headers=headers, timeout=10)  # 加 timeout
             soup = BeautifulSoup(resp.text, "html.parser")
             tables = soup.find_all("table")
 
             eps_growth = False
-            dividend_yield = 0
-            ytd_return = 0
+            dividend_yield = 0.0
+            ytd_return = 0.0
 
-            # 從第 2 張表格尋找 EPS
             if len(tables) >= 2:
                 rows = tables[1].find_all("tr")
                 eps_values = []
@@ -38,9 +34,9 @@ def fetch_eps_dividend_data(stock_ids):
                 if len(eps_values) >= 2 and eps_values[-1] > eps_values[-2]:
                     eps_growth = True
 
-            # 抓殖利率與 YTD（可換來源）
-            dividend_yield = fetch_yield_from_cnyes(stock_id)
-            ytd_return = fetch_ytd_from_cnyes(stock_id)
+            # 模擬用假資料（後續可接真 API）
+            dividend_yield = round(2 + (int(stock_id[-1]) % 3), 2)
+            ytd_return = round((int(stock_id[-2:]) % 20 - 10) / 10, 2)
 
             result.append({
                 "stock_id": stock_id,
@@ -48,18 +44,10 @@ def fetch_eps_dividend_data(stock_ids):
                 "dividend_yield": dividend_yield,
                 "ytd_return": ytd_return
             })
+
         except Exception as e:
-            print(f"[eps_dividend_scraper] 無法處理 {stock_id}: {e}")
+            print(f"[eps_dividend_scraper] ❌ 無法處理 {stock_id}: {e}")
 
     df = pd.DataFrame(result)
-    print(f"[eps_dividend_scraper] 完成 EPS 與殖利率擷取，共 {len(df)} 檔")
+    print(f"[eps_dividend_scraper] ✅ 擷取完成，共 {len(df)} 檔")
     return df
-
-# 輔助：從鉅亨網或其他 API 抓殖利率（模擬）
-def fetch_yield_from_cnyes(stock_id):
-    # 範例：自行更換為穩定來源
-    return round(2 + (int(stock_id[-1]) % 3), 2)  # 模擬值 2%~4%
-
-# 輔助：從鉅亨網或其他 API 抓報酬率（模擬）
-def fetch_ytd_from_cnyes(stock_id):
-    return round((int(stock_id[-2:]) % 20 - 10) / 10, 2)  # 模擬值 -1 ~ +1
