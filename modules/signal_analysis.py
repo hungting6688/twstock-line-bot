@@ -14,7 +14,7 @@ def analyze_stocks_with_signals(
 ):
     if stock_ids is None:
         stock_ids = get_top_stocks(limit=limit, filter_type=filter_type)
-        print(f"[debug] 獲得熱門股票數量：{len(stock_ids)}")
+        print(f"[debug] 熱門股清單：{stock_ids}")
 
     price_data = analyze_technical_indicators(stock_ids)
     eps_data = get_eps_data()
@@ -24,28 +24,18 @@ def analyze_stocks_with_signals(
     observed = []
     weak_alerts = []
 
-    print(f"[debug] 技術分析結果數量：{len(price_data)}")
-
     for sid in stock_ids:
-        if sid not in price_data:
-            print(f"[debug] 無分析資料：{sid}")
-            continue
-
-        pdata = price_data[sid]
-        eps_info = eps_data.get(sid, {})
-
+        pdata = price_data.get(sid, {})
         score = pdata.get("score", 0)
         comment = pdata.get("suggestion", "")
         weak = pdata.get("is_weak", False)
 
-        line = f"{sid} | Score: {score} | {comment}"
         print(f"[debug] {sid} 分數：{score}, 建議：{comment}")
 
+        line = f"{sid} | Score: {score} | {comment}"
         if score >= min_score:
-            print(f"[debug] ✅ 加入推薦股：{sid}")
             recommended.append((score, line))
         else:
-            print(f"[debug] ➖ 加入觀察股：{sid}")
             observed.append((score, line))
 
         if include_weak and weak:
@@ -53,8 +43,6 @@ def analyze_stocks_with_signals(
 
     recommended.sort(reverse=True)
     observed.sort(reverse=True)
-
-    print(f"[debug] 推薦股票數量：{len(recommended)}，觀察股數量：{len(observed)}")
 
     result_lines.append(f"📌 分析模式：{mode}")
     if recommended:
