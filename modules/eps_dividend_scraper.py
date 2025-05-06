@@ -22,7 +22,6 @@ def get_latest_season():
 
 def get_eps_data() -> dict:
     year, season = get_latest_season()
-
     headers = {"User-Agent": "Mozilla/5.0"}
 
     # EPS
@@ -86,3 +85,8 @@ def get_eps_data() -> dict:
         result[sid]["dividend"] = round(row["Dividend"], 2)
 
     return result
+
+def get_dividend_data() -> dict:
+    """單獨回傳 dividend 對照表"""
+    all_data = get_eps_data()
+    return {sid: val["dividend"] for sid, val in all_data.items() if val["dividend"] is not None}
