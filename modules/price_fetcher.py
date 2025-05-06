@@ -1,39 +1,46 @@
 # modules/price_fetcher.py
 print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 
-import pandas as pd
 import requests
+import pandas as pd
 from io import StringIO
 
-def get_realtime_top_stocks(limit: int = 100) -> list:
+def get_realtime_top_stocks(min_turnover=50000000, limit=100):
     url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"
 
     try:
         response = requests.get(url, timeout=10)
         response.encoding = "big5"
-        raw_data = response.text
 
-        # 過濾出包含有效股票代號的行（例如開頭為數字）
-        lines = raw_data.splitlines()
-        valid_rows = [line for line in lines if line.strip() and line.strip()[0].isdigit()]
-        cleaned_data = "\n".join(valid_rows)
+        # 過濾掉非表格內容的行（通常是說明或空行）
+        cleaned_lines = [line for line in response.text.split("\n") if line.count(",") > 10]
+        cleaned_csv = "\n".join(cleaned_lines)
 
-        df = pd.read_csv(StringIO(cleaned_data), header=None)
+        df = pd.read_csv(StringIO(cleaned_csv))
+        df.columns = df.columns.str.strip()
 
-        # 避免欄位數錯誤，強制取前幾欄
-        df = df.iloc[:, :9]
-        df.columns = ["stock_id", "name", "成交股數", "成交金額", "成交筆數", "開盤價", "最高價", "最低價", "收盤價"]
+        # 嘗試找出正確欄位名稱
+        possible_columns = [
+            ("證券代號", "成交金額"),
+            ("股票代號", "成交金額(千元)")
+        ]
 
-        df["成交金額"] = df["成交金額"].str.replace(",", "", regex=False)
-        df["turnover"] = pd.to_numeric(df["成交金額"], errors="coerce")
-        df = df.dropna(subset=["stock_id", "turnover"])
+        for stock_col, turnover_col in possible_columns:
+            if stock_col in df.columns and turnover_col in df.columns:
+                df = df[[stock_col, turnover_col]]
+                df.columns = ["stock_id", "turnover"]
+                break
+        else:
+            raise ValueError("❌ 無法找到適用的欄位名稱")
 
-        # 僅保留成交金額大於五千萬的股票
-        df = df[df["turnover"] > 50000]
         df["stock_id"] = df["stock_id"].astype(str).str.zfill(4)
+        df["turnover"] = pd.to_numeric(df["turnover"].astype(str).str.replace(",", ""), errors="coerce")
+        df = df.dropna(subset=["turnover"])
+        df = df[df["turnover"] > min_turnover]
+        df = df.sort_values(by="turnover", ascending=False).head(limit)
 
-        top_stocks = df["stock_id"].tolist()
-        return top_stocks[:limit]
+        print(f"[price_fetcher] ✅ 成功取得熱門股 {len(df)} 檔")
+        return df["stock_id"].tolist()
 
     except Exception as e:
         print(f"[price_fetcher] ❌ 資料解析失敗：{e}")
