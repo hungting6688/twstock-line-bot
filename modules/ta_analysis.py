@@ -1,3 +1,4 @@
+print("[ta_analysis] ✅ 已載入最新版")
 import yfinance as yf
 import pandas as pd
 import numpy as np
