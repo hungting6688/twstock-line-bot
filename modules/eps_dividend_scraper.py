@@ -37,7 +37,6 @@ def get_eps_data() -> dict:
         "season": season
     }
     eps_res = requests.post(eps_url, data=eps_form, headers=headers)
-
     try:
         eps_df = pd.read_html(StringIO(eps_res.text))[1]
         eps_df.columns = eps_df.columns.str.strip()
@@ -59,7 +58,6 @@ def get_eps_data() -> dict:
         "TYPEK": "sii"
     }
     div_res = requests.post(div_url, data=div_form, headers=headers)
-
     try:
         div_df = pd.read_html(StringIO(div_res.text))[1]
         div_df.columns = div_df.columns.str.strip()
@@ -71,7 +69,6 @@ def get_eps_data() -> dict:
         print(f"[Dividend] 查無股利表格或格式錯誤：{e}")
         div_df = pd.DataFrame(columns=["stock_id", "Dividend"])
 
-    # 整合結果
     result = {}
     for _, row in eps_df.iterrows():
         sid = str(row["stock_id"]).zfill(4)
