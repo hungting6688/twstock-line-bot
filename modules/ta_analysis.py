@@ -1,4 +1,5 @@
-print("[ta_analysis] ✅ 最新修正版 v1.7 (支援權重策略 + 類型保護)")
+# modules/ta_analysis.py
+print("[ta_analysis] ✅ 最新修正版 v1.7 (修正 EPS 判斷錯誤)")
 
 import yfinance as yf
 import pandas as pd
@@ -20,8 +21,6 @@ def generate_suggestion_text(score, comments):
     return prefix + " + ".join(comments) + suffix
 
 def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_data: dict = {}) -> dict:
-    assert isinstance(eps_data, dict), f"eps_data 必須是 dict，但目前是 {type(eps_data)}"
-
     results = {}
 
     for sid in stock_ids:
@@ -87,18 +86,17 @@ def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_dat
             if close.iloc[-1] < ma20.iloc[-1] and rsi.iloc[-1] < 40:
                 comments.append("中期偏弱")
 
-            # --- EPS 與 Dividend 安全取用 ---
-            eps_info = eps_data.get(sid, {})
-            eps = eps_info.get("eps", None)
-            dividend = eps_info.get("dividend", None)
+            # --- EPS 與殖利率 ---
+            eps_val = eps_data.get(sid, {}).get("eps")
+            dividend_val = eps_data.get(sid, {}).get("dividend")
 
-            if indicators.get("eps", 0) > 0 and eps is not None and eps >= 2:
+            if indicators.get("eps", 0) > 0 and isinstance(eps_val, (int, float)) and eps_val >= 2:
                 score += indicators["eps"]
-                comments.append(f"EPS 穩定（{eps}）")
+                comments.append(f"EPS 穩定（{eps_val}）")
 
-            if indicators.get("dividend", 0) > 0 and dividend is not None and dividend >= 2:
+            if indicators.get("dividend", 0) > 0 and isinstance(dividend_val, (int, float)) and dividend_val >= 2:
                 score += indicators["dividend"]
-                comments.append(f"殖利率佳（{dividend}）")
+                comments.append(f"殖利率佳（{dividend_val}）")
 
             is_weak = (
                 rsi.iloc[-1] < 30 and
