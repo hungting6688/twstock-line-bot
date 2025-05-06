@@ -2,9 +2,10 @@
 
 import requests
 import pandas as pd
-from bs4 importBeautifulSoup
+from bs4 import BeautifulSoup
 from io import StringIO
 from datetime import datetime
+
 
 def fetch_price_data(min_turnover=50000000):
     print("[price_fetcher] 載入當日股價與成交金額...")
