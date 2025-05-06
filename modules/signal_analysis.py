@@ -1,5 +1,3 @@
-# modules/signal_analysis.py
-
 import pandas as pd
 from modules.ta_analysis import calculate_technical_scores
 from modules.price_fetcher import fetch_price_data
@@ -12,6 +10,12 @@ def analyze_stocks_with_signals(min_turnover=50000000, min_score=5, eps_limit=20
     # Step 1：熱門股價資料
     print("[signal_analysis] ⏳ 擷取熱門股清單...")
     price_df = fetch_price_data(min_turnover=min_turnover)
+    
+    # 若熱門股資料為空，提前返回
+    if price_df.empty:
+        print("[signal_analysis] ⚠️ 熱門股清單為空，終止分析")
+        return pd.DataFrame()
+
     stock_ids = price_df['stock_id'].tolist()
     print(f"[signal_analysis] 🔍 共擷取到 {len(stock_ids)} 檔熱門股")
 
@@ -34,11 +38,14 @@ def analyze_stocks_with_signals(min_turnover=50000000, min_score=5, eps_limit=20
     df['ytd_return'] = df['ytd_return'].fillna(0.0)
     df['buy_total'] = df['buy_total'].fillna(0)
 
-    # Step 6：技術分析與評分
+    # Step 6：法人買超加分（若法人淨買超，則加分）
+    df['score'] = df.apply(lambda row: row['score'] + 1 if row['buy_total'] > 0 else row['score'], axis=1)
+
+    # Step 7：技術分析與評分
     print("[signal_analysis] 📊 計算技術分數與投資建議...")
     final_df = calculate_technical_scores(df)
 
-    # Step 7：選出推薦股票
+    # Step 8：選出推薦股票
     recommended = final_df[final_df['score'] >= min_score] \
                     .sort_values(by='score', ascending=False) \
                     .reset_index(drop=True)
