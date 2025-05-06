@@ -1,3 +1,4 @@
+# modules/eps_dividend_scraper.py
 print("[eps_dividend_scraper] ✅ 已載入最新版")
 
 import requests
@@ -35,9 +36,10 @@ def get_eps_data() -> dict:
         "year": year,
         "season": season
     }
-    eps_res = requests.post(eps_url, data=eps_form, headers=headers)
     try:
-        eps_df = pd.read_html(StringIO(eps_res.text))[1]
+        eps_res = requests.post(eps_url, data=eps_form, headers=headers)
+        tables = pd.read_html(StringIO(eps_res.text))
+        eps_df = tables[1] if len(tables) > 1 else pd.DataFrame()
         eps_df.columns = eps_df.columns.str.strip()
         eps_df = eps_df.rename(columns={"公司代號": "stock_id", "基本每股盈餘（元）": "EPS"})
         eps_df = eps_df[["stock_id", "EPS"]].dropna()
@@ -56,9 +58,10 @@ def get_eps_data() -> dict:
         "off": "1",
         "TYPEK": "sii"
     }
-    div_res = requests.post(div_url, data=div_form, headers=headers)
     try:
-        div_df = pd.read_html(StringIO(div_res.text))[1]
+        div_res = requests.post(div_url, data=div_form, headers=headers)
+        tables = pd.read_html(StringIO(div_res.text))
+        div_df = tables[1] if len(tables) > 1 else pd.DataFrame()
         div_df.columns = div_df.columns.str.strip()
         div_df = div_df.rename(columns={"公司代號": "stock_id", "現金股利": "Dividend"})
         div_df = div_df[["stock_id", "Dividend"]].dropna()
@@ -84,5 +87,4 @@ def get_eps_data() -> dict:
 
     print(f"[EPS] ✅ 成功匯入 EPS 資料筆數：{len(eps_df)}")
     print(f"[Dividend] ✅ 成功匯入股利資料筆數：{len(div_df)}")
-
     return result
