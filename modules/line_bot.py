@@ -3,12 +3,12 @@
 import os
 import requests
 
-def send_line_bot_message(message: str):
+def send_line_bot_message(msg: str):
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     user_id = os.environ.get("LINE_USER_ID")
 
     if not token or not user_id:
-        print("[LINE BOT] ❌ 缺少 LINE_CHANNEL_ACCESS_TOKEN 或 LINE_USER_ID")
+        print("[line_bot] ❌ 找不到 LINE Token 或 User ID")
         return
 
     headers = {
@@ -16,15 +16,21 @@ def send_line_bot_message(message: str):
         "Content-Type": "application/json"
     }
 
-    data = {
+    body = {
         "to": user_id,
-        "messages": [{"type": "text", "text": message[:1000]}]  # LINE 單則訊息上限 1000 字
+        "messages": [{
+            "type": "text",
+            "text": msg
+        }]
     }
 
-    url = "https://api.line.me/v2/bot/message/push"
-    response = requests.post(url, headers=headers, json=data)
+    response = requests.post(
+        "https://api.line.me/v2/bot/message/push",
+        headers=headers,
+        json=body
+    )
 
-    if response.status_code != 200:
-        print(f"[LINE BOT] ❌ 推播失敗：{response.status_code}, {response.text}")
+    if response.status_code == 200:
+        print("[line_bot] ✅ 訊息發送成功")
     else:
-        print("[LINE BOT] ✅ 推播成功")
+        print(f"[line_bot] ❌ 發送失敗：{response.text}")
