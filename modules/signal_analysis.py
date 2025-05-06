@@ -1,77 +1,69 @@
 print("[signal_analysis] ✅ 已載入最新版")
 
-from modules.price_fetcher import fetch_top_stocks
 from modules.ta_analysis import analyze_technical_indicators
+from modules.price_fetcher import get_realtime_top_stocks
 from modules.eps_dividend_scraper import get_eps_data
 from modules.strategy_profiles import STRATEGY_PROFILES
 
-def analyze_stocks_with_signals(mode: str) -> str:
-    config = STRATEGY_PROFILES.get(mode, {})
-    limit = config.get("scan_limit", 100)
-    min_score = config.get("min_score", 3.5)
-    include_weak = config.get("include_weak", False)
-    indicators = config.get("indicators", [])
+def analyze_stocks_with_signals(mode="opening", **kwargs):
+    profile = STRATEGY_PROFILES.get(mode, {})
+    scan_limit = kwargs.get("scan_limit", profile.get("scan_limit"))
+    min_score = kwargs.get("min_score", profile.get("min_score"))
+    include_weak = kwargs.get("include_weak", profile.get("include_weak", False))
+    weights = profile.get("weights", {})
+    indicators = profile.get("indicators", [])
 
-    print(f"[signal] 分析模式：{mode} | 掃描檔數：{limit} | 最低分數：{min_score}")
+    print(f"[signal] 分析模式：{mode} | 掃描檔數：{scan_limit} | 最低分數：{min_score}")
 
-    stock_list = fetch_top_stocks(limit=limit)
+    stock_list = get_realtime_top_stocks(limit=scan_limit)
     print(f"[signal] 取得 {len(stock_list)} 檔股票進行分析")
 
     eps_data = get_eps_data()
-    result_lines = []
-    fallback_lines = []
+    print(f"[EPS] ✅ 成功匯入 EPS 資料筆數：{len(eps_data)}")
+    print(f"[Dividend] ✅ 成功匯入股利資料筆數：{sum(1 for d in eps_data.values() if d['dividend'] is not None)}")
 
-    for stock_id, stock_df in stock_list.items():
-        score = 0
-        reasons = []
-        suggestions = []
+    results = []
+    for stock_id in stock_list:
+        try:
+            indicators_result = analyze_technical_indicators(stock_id)
+            score = 0.0
+            reasons = []
 
-        signals = analyze_technical_indicators(stock_df)
-        if not signals:
+            for ind in indicators:
+                if ind in indicators_result and indicators_result[ind]["signal"]:
+                    weight = weights.get(ind, 1.0)
+                    score += weight
+                    reasons.append(indicators_result[ind]["reason"])
+
+            # EPS / Dividend 加分
+            if "eps" in weights and stock_id in eps_data and eps_data[stock_id]["eps"]:
+                score += weights["eps"]
+                reasons.append("EPS 穩定成長")
+            if "dividend" in weights and stock_id in eps_data and eps_data[stock_id]["dividend"]:
+                score += weights["dividend"]
+                reasons.append("穩定配息")
+
+            results.append({
+                "stock_id": stock_id,
+                "score": round(score, 2),
+                "reasons": reasons
+            })
+
+        except Exception as e:
+            print(f"[ta_analysis] {stock_id} 分析失敗：{e}")
             continue
 
-        for ind in indicators:
-            if ind in ["macd", "kd", "ma"] and signals.get(ind):
-                score += 1
-                reasons.append(ind.upper())
-            if ind == "rsi":
-                rsi_val = signals.get("rsi", 50)
-                if rsi_val < 30:
-                    score += 1
-                    reasons.append("RSI < 30")
-                elif rsi_val > 70 and include_weak:
-                    reasons.append("RSI > 70")
+    # 推薦與觀察股篩選
+    recommendations = [r for r in results if r["score"] >= min_score]
+    fallback = sorted(results, key=lambda x: x["score"], reverse=True)[:3]
 
-        # EPS 與 Dividend 條件
-        eps = eps_data.get(stock_id, {}).get("eps")
-        dividend = eps_data.get(stock_id, {}).get("dividend")
-        if "eps" in indicators and eps is not None and eps > 1.5:
-            score += 1
-            reasons.append("EPS > 1.5")
-        if "dividend" in indicators and dividend is not None and dividend > 2.0:
-            score += 1
-            reasons.append("高股利")
-
-        # 建議文字
-        suggestions.extend(signals.get("suggestions", []))
-        if eps and eps > 3:
-            suggestions.append("EPS 穩健成長，基本面良好")
-        if dividend and dividend > 3:
-            suggestions.append("配息大於 3 元，適合存股")
-
-        message = f"📈 {stock_id} | 分數：{score}\n"
-        message += "📊 條件：" + "、".join(reasons) + "\n"
-        if suggestions:
-            message += "💡 建議：" + "；".join(suggestions) + "\n"
-
-        if score >= min_score:
-            result_lines.append(message)
-        elif include_weak:
-            fallback_lines.append(message)
-
-    if result_lines:
-        return "\n".join(result_lines[:5])
-    elif fallback_lines:
-        return "⚠️ 今日無強烈推薦股，以下為觀察股：\n" + "\n".join(fallback_lines[:3])
+    msg = f"[{mode.upper()} 推薦結果]\n"
+    if recommendations:
+        for r in sorted(recommendations, key=lambda x: x["score"], reverse=True):
+            msg += f"✅ {r['stock_id']} | 分數 {r['score']} 分\n－" + "；".join(r["reasons"]) + "\n"
     else:
-        return "⚠️ 今日無符合條件之推薦股"
+        msg += "⚠️ 無推薦股，以下為觀察名單：\n"
+        for r in fallback:
+            msg += f"🔍 {r['stock_id']} | 分數 {r['score']} 分\n－" + "；".join(r["reasons"]) + "\n"
+
+    return msg
