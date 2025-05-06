@@ -1,58 +1,52 @@
-# modules/signal_analysis.py
 print("[signal_analysis] ✅ 已載入最新版")
 
-from modules.ta_analysis import analyze_technical_indicators
+from modules.strategy_profiles import STRATEGY_PROFILES
 from modules.price_fetcher import get_top_stocks
 from modules.eps_dividend_scraper import get_eps_data
-from modules.strategy_profiles import STRATEGY_PROFILES
+from modules.ta_analysis import analyze_technical_indicators
 
 def analyze_stocks_with_signals(mode="opening", **kwargs):
-    strategy = STRATEGY_PROFILES.get(mode, STRATEGY_PROFILES["opening"])
-    
-    # 支援可覆蓋策略的彈性參數
-    limit = kwargs.get("limit", strategy.get("scan_limit", 100))
-    min_score = kwargs.get("min_score", strategy.get("min_score", 4))
-    include_weak = kwargs.get("include_weak", strategy.get("include_weak", False))
-    indicators = kwargs.get("indicators", strategy.get("indicators", {}))
-    comment = strategy.get("comment", "")
+    profile = STRATEGY_PROFILES.get(mode, {})
+    limit = kwargs.get("limit", profile.get("scan_limit", 100))
+    min_score = kwargs.get("min_score", profile.get("min_score", 4))
+    include_weak = kwargs.get("include_weak", profile.get("include_weak", False))
+    indicators = profile.get("indicators", {})
+    comment = profile.get("comment", "")
 
     print(f"[signal] 分析模式：{mode} | 掃描檔數：{limit} | 最低分數：{min_score}")
+    
     stock_ids = get_top_stocks(limit=limit)
     print(f"[signal] 取得 {len(stock_ids)} 檔股票進行分析")
 
     eps_data = get_eps_data()
-    tech_results = analyze_technical_indicators(
-        stock_ids,
-        indicators=indicators,
-        eps_data=eps_data
-    )
+    results = analyze_technical_indicators(stock_ids, indicators, eps_data)
 
-    recommend = []
-    weak_alerts = []
+    recommended = []
+    fallback = []
 
-    for sid, res in tech_results.items():
-        if res["score"] >= min_score:
-            recommend.append((sid, res))
-        elif include_weak and res.get("is_weak"):
-            weak_alerts.append((sid, res))
+    for sid, info in results.items():
+        score = info["score"]
+        suggestion = info["suggestion"]
+        is_weak = info["is_weak"]
 
-    recommend.sort(key=lambda x: x[1]["score"], reverse=True)
+        if score >= min_score:
+            recommended.append((sid, score, suggestion))
+        elif include_weak and is_weak:
+            fallback.append((sid, score, "⚠️ 技術面極弱，請留意風險"))
+        else:
+            fallback.append((sid, score, suggestion))
 
-    # 組裝推播訊息
-    msg = f"📌 分析模式：{mode}\n"
-    if recommend:
-        msg += "✅ 推薦股票：\n"
-        for sid, res in recommend:
-            msg += f"{sid} | Score: {res['score']} | {res['suggestion']}\n"
+    recommended.sort(key=lambda x: -x[1])
+    fallback.sort(key=lambda x: -x[1])
+
+    lines = [f"📊【{comment}】"]
+    if recommended:
+        lines.append("✅ 推薦股票：")
+        for sid, score, sugg in recommended:
+            lines.append(f"- {sid}（{score}分）：{sugg}")
     else:
-        msg += "（無股票達推薦標準，列出觀察股）\n"
-        top_candidates = sorted(tech_results.items(), key=lambda x: x[1]["score"], reverse=True)[:5]
-        for sid, res in top_candidates:
-            msg += f"{sid} | Score: {res['score']} | {res['suggestion']}\n"
+        lines.append("⚠️ 無符合推薦門檻，以下為觀察名單：")
+        for sid, score, sugg in fallback[:3]:
+            lines.append(f"- {sid}（{score}分）：{sugg}")
 
-    if weak_alerts:
-        msg += "\n⚠️ 極弱提醒：\n"
-        for sid, res in weak_alerts:
-            msg += f"{sid} | {res['suggestion']}\n"
-
-    return msg.strip()
+    return "\n".join(lines)
