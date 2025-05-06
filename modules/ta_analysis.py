@@ -1,5 +1,4 @@
-# modules/ta_analysis.py
-print("[ta_analysis] ✅ 最新修正版 v1.7 (修正 EPS 判斷錯誤)")
+print("[ta_analysis] ✅ 最新修正版 v1.8 (修正 Series 判斷錯誤)")
 
 import yfinance as yf
 import pandas as pd
@@ -25,7 +24,7 @@ def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_dat
 
     for sid in stock_ids:
         try:
-            df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False)
+            df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False, auto_adjust=False)
             if df.empty or len(df) < 30:
                 continue
 
@@ -63,17 +62,20 @@ def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_dat
             score = 0
             comments = []
 
-            if indicators.get("macd", 0) > 0 and macd_hist.iloc[-1] > 0 and dif.iloc[-1] > dea.iloc[-1]:
-                score += indicators["macd"]
-                comments.append("MACD 剛翻多")
+            if indicators.get("macd", 0) > 0:
+                if macd_hist.iloc[-1] > 0.0 and dif.iloc[-1] > dea.iloc[-1]:
+                    score += indicators["macd"]
+                    comments.append("MACD 剛翻多")
 
-            if indicators.get("kd", 0) > 0 and k.iloc[-1] > d.iloc[-1] and k.iloc[-1] < 60:
-                score += indicators["kd"]
-                comments.append("KD 黃金交叉")
+            if indicators.get("kd", 0) > 0:
+                if k.iloc[-1] > d.iloc[-1] and k.iloc[-1] < 60:
+                    score += indicators["kd"]
+                    comments.append("KD 黃金交叉")
 
-            if indicators.get("rsi", 0) > 0 and rsi.iloc[-1] < 30:
-                score += indicators["rsi"]
-                comments.append("RSI 超跌")
+            if indicators.get("rsi", 0) > 0:
+                if rsi.iloc[-1] < 30:
+                    score += indicators["rsi"]
+                    comments.append("RSI 超跌")
 
             if indicators.get("ma", 0) > 0:
                 if close.iloc[-1] > ma5.iloc[-1]:
@@ -87,34 +89,4 @@ def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_dat
                 comments.append("中期偏弱")
 
             if indicators.get("eps", 0) > 0 and sid in eps_data:
-                eps_value = eps_data[sid].get("eps")
-                if isinstance(eps_value, (float, int)) and eps_value >= 2:
-                    score += indicators["eps"]
-                    comments.append(f"EPS 穩定（{eps_value}）")
-
-            if indicators.get("dividend", 0) > 0 and sid in eps_data:
-                div_value = eps_data[sid].get("dividend")
-                if isinstance(div_value, (float, int)) and div_value >= 2:
-                    score += indicators["dividend"]
-                    comments.append(f"殖利率佳（{div_value}）")
-
-            is_weak = (
-                rsi.iloc[-1] < 30 and
-                close.iloc[-1] < ma5.iloc[-1] and
-                close.iloc[-1] < ma20.iloc[-1] and
-                close.iloc[-1] < ma60.iloc[-1]
-            )
-
-            suggestion = generate_suggestion_text(score, comments)
-
-            results[sid] = {
-                "score": round(score, 2),
-                "suggestion": suggestion,
-                "is_weak": is_weak
-            }
-
-        except Exception as e:
-            print(f"[ta_analysis] {sid} 分析失敗：{e}")
-            continue
-
-    return results
+                if eps_data[sid]["eps]()_
