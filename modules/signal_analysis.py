@@ -1,57 +1,40 @@
-print("[signal_analysis] ✅ 已載入最新版")
+# signal_analysis.py
+import pandas as pd
+from ta_analysis import calculate_technical_scores
+from price_fetcher import fetch_price_data
+from eps_dividend_scraper import fetch_eps_dividend_data
+from fundamental_scraper import fetch_fundamental_data
 
-from modules.price_fetcher import get_top_stocks
-from modules.eps_dividend_scraper import get_eps_and_dividend
-from modules.ta_analysis import analyze_technical_indicators
-from modules.strategy_profiles import STRATEGY_CONFIGS
-from modules.line_bot import send_line_bot_message
+def analyze_stocks_with_signals(min_turnover=50000000, min_score=5):
+    print("[signal_analysis] 開始整合分析資料...")
 
-def analyze_stocks_with_signals(mode="opening", limit=None, min_score=None, include_weak=None):
-    config = STRATEGY_CONFIGS.get(mode, STRATEGY_CONFIGS["opening"])
-    limit = limit if limit is not None else config["limit"]
-    min_score = min_score if min_score is not None else config["min_score"]
-    include_weak = include_weak if include_weak is not None else config["include_weak"]
-    weights = config.get("weights", {})
+    # Step 1：抓熱門股價與成交金額
+    price_df = fetch_price_data(min_turnover=min_turnover)
+    stock_ids = price_df['stock_id'].tolist()
 
-    print(f"[signal] 分析模式：{mode} | 掃描檔數：{limit} | 最低分數：{min_score}")
+    # Step 2：抓 EPS / 殖利率 / YTD 報酬率
+    eps_df = fetch_eps_dividend_data(stock_ids)
 
-    try:
-        top_stocks = get_top_stocks(limit)
-    except Exception as e:
-        print(f"[price_fetcher] ❌ 資料解析失敗：{e}")
-        top_stocks = []
+    # Step 3：抓法人買超
+    fund_df = fetch_fundamental_data()
 
-    if not top_stocks:
-        print("[signal] 取得 0 檔股票進行分析")
-        return
+    # Step 4：合併所有資料
+    df = price_df.merge(eps_df, on='stock_id', how='left') \
+                 .merge(fund_df, on='stock_id', how='left')
 
-    eps_data, dividend_data = get_eps_and_dividend()
-    print(f"[EPS] ✅ 成功匯入 EPS 資料筆數：{len(eps_data)}")
-    print(f"[Dividend] ✅ 成功匯入股利資料筆數：{len(dividend_data)}")
+    # Step 5：填補缺失
+    df['eps_growth'] = df['eps_growth'].fillna(False)
+    df['dividend_yield'] = df['dividend_yield'].fillna(0.0)
+    df['ytd_return'] = df['ytd_return'].fillna(0.0)
+    df['buy_total'] = df['buy_total'].fillna(0)
 
-    results = []
-    for stock_id in top_stocks:
-        result = analyze_technical_indicators(stock_id, eps_data, dividend_data, weights)
-        if result:
-            results.append(result)
+    # Step 6：技術指標計算（已內建技術指標邏輯）
+    final_df = calculate_technical_scores(df)
 
-    recommended = [r for r in results if r["score"] >= min_score]
-    fallback = sorted(results, key=lambda x: x["score"], reverse=True)[:3]
+    # Step 7：推薦排序
+    recommended = final_df[final_df['score'] >= min_score] \
+                    .sort_values(by='score', ascending=False) \
+                    .reset_index(drop=True)
 
-    if recommended:
-        message = f"[{mode.upper()} 推薦股票]\n"
-        for r in recommended:
-            message += f"{r['stock_id']} | 分數：{r['score']} | 建議：{r['suggestion']}\n"
-    else:
-        message = f"[{mode.upper()} 無推薦股，回傳觀察股]\n"
-        for r in fallback:
-            message += f"{r['stock_id']} | 分數：{r['score']} | 建議：{r['suggestion']}\n"
-
-    try:
-        send_line_bot_message(message)
-    except Exception as e:
-        print(f"[LINE BOT] ❌ 推播失敗：{e}")
-    else:
-        print("[LINE BOT] ✅ 推播成功")
-
-    return recommended or fallback
+    print(f"[signal_analysis] 推薦股票共 {len(recommended)} 檔")
+    return recommended
