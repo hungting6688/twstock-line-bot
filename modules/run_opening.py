@@ -1,7 +1,4 @@
-# modules/run_opening.py
-
 from modules.signal_analysis import analyze_stocks_with_signals
-from modules.line_bot import send_line_bot_message
 
 def format_message(df):
     if df.empty:
