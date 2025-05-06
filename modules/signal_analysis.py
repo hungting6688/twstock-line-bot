@@ -1,5 +1,5 @@
 # modules/signal_analysis.py
-
+print("[signal_analysis] ✅ 已載入最新版")
 from modules.ta_analysis import analyze_technical_indicators
 from modules.eps_dividend_scraper import get_eps_data
 from modules.price_fetcher import get_top_stocks
