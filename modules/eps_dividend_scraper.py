@@ -1,43 +1,20 @@
 # modules/eps_dividend_scraper.py
 
-import requests
-import pandas as pd
-from datetime import datetime
-
-def fetch_eps_dividend_data():
-    url = "https://mops.twse.com.tw/mops/web/ajax_t163sb04"
-    today = datetime.today()
-    year = today.year - 1911
-    season = (today.month - 1) // 3 + 1
-
-    eps_data = []
-    for s in range(1, season + 1):
-        payload = {
-            "encodeURIComponent": "1",
-            "step": "1",
-            "firstin": "1",
-            "off": "1",
-            "TYPEK": "sii",
-            "year": str(year),
-            "season": f"{s}"
+def get_eps_data() -> dict:
+    """
+    模擬回傳每檔股票的 EPS / 股利等基本面資料。
+    真實版本未來可透過公開財報網站爬蟲實作。
+    
+    回傳格式：
+        {
+            "2330": {"eps": 25.6, "dividend": 18},
+            "2317": {"eps": 10.2, "dividend": 5},
+            ...
         }
-        r = requests.post(url, data=payload)
-        try:
-            df = pd.read_html(r.text)[1]
-            df.columns = df.columns.droplevel()
-            eps_data.append(df)
-        except Exception:
-            continue
-
-    if not eps_data:
-        return pd.DataFrame()
-
-    combined = pd.concat(eps_data, ignore_index=True)
-    combined = combined.rename(columns={
-        "公司代號": "stock_id",
-        "基本每股盈餘（元）": "eps"
-    })
-    combined["stock_id"] = combined["stock_id"].astype(str)
-    combined = combined[["stock_id", "eps"]].dropna()
-    combined["eps"] = pd.to_numeric(combined["eps"], errors="coerce")
-    return combined
+    """
+    return {
+        "2330": {"eps": 25.6, "dividend": 18},
+        "2317": {"eps": 10.2, "dividend": 5},
+        "2454": {"eps": 15.3, "dividend": 10},
+        "2303": {"eps": 5.1, "dividend": 2},
+    }
