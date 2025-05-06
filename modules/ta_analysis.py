@@ -1,4 +1,4 @@
-print("[ta_analysis] ✅ 最新修正版 v1.4")
+print("[ta_analysis] ✅ 最新修正版 v1.5 (Series 強制轉換)")
 
 import yfinance as yf
 import pandas as pd
@@ -21,13 +21,16 @@ def analyze_technical_indicators(stock_ids: list[str]) -> dict:
         try:
             print(f"[ta_analysis] 🔍 分析 {sid}")
             df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False)
+
             if df.empty or len(df) < 30:
                 continue
 
             df = df.dropna()
-            close = df["Close"]
-            low = df["Low"]
-            high = df["High"]
+
+            # 強制取第一欄為 Series，避免 DataFrame 導致 ambiguous 錯誤
+            close = df["Close"].squeeze()
+            low = df["Low"].squeeze()
+            high = df["High"].squeeze()
 
             # --- MACD ---
             ema12 = close.ewm(span=12, adjust=False).mean()
