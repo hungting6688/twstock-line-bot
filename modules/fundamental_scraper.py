@@ -4,6 +4,7 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from datetime import datetime
+from io import StringIO
 import re
 
 def fetch_fundamental_data():
@@ -23,7 +24,7 @@ def fetch_fundamental_data():
         df = None
         for table in tables:
             try:
-                df_try = pd.read_html(str(table), flavor="bs4")[0]
+                df_try = pd.read_html(StringIO(str(table)), flavor="bs4")[0]
                 if "證券代號" in df_try.columns and "外陸資買賣超股數(不含外資自營商)" in df_try.columns:
                     df = df_try
                     break
@@ -41,7 +42,6 @@ def fetch_fundamental_data():
             "自營商買賣超股數(自行買賣)": "dealer"
         })
 
-        # 清理代碼格式，保留數字與大寫字母（如 ETF）
         df['stock_id'] = df['stock_id'].astype(str).str.replace('="', '').str.replace('"', '').str.strip()
         df = df[df['stock_id'].apply(lambda x: re.fullmatch(r'[0-9A-Z]+', x) is not None)]
 
