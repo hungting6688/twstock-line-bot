@@ -1,38 +1,33 @@
 # modules/price_fetcher.py
 print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 
-import requests
+import yfinance as yf
 import pandas as pd
+import requests
+from io import StringIO
 
-def get_top_stocks(limit=100, filter_type=None):
-    try:
-        url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=&type=ALL"
-        res = requests.get(url, timeout=10)
-        data = res.json()
+def get_realtime_top_stocks(limit=100):
+    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"
+    res = requests.get(url)
+    raw_text = res.text
 
-        # 找到成交金額資料的 table（通常在第 8~10 個之間）
-        for table in data["tables"]:
-            df = pd.DataFrame(table["data"], columns=table["fields"])
-            if "證券代號" in df.columns and "成交金額" in df.columns:
-                break
-        else:
-            raise ValueError("無法找到有效的熱門股資料")
+    # 清理 CSV 格式
+    lines = [line for line in raw_text.split("\n") if len(line.split(",")) > 10]
+    csv_data = "\n".join(lines)
+    df = pd.read_csv(StringIO(csv_data))
 
-        df["成交金額"] = pd.to_numeric(df["成交金額"].str.replace(",", ""), errors="coerce")
-        df = df.sort_values(by="成交金額", ascending=False)
+    # 過濾與清理欄位
+    df.columns = df.columns.str.strip()
+    df = df.rename(columns={"證券代號": "stock_id", "成交金額(元)": "turnover"})
 
-        df["證券代號"] = df["證券代號"].astype(str)
-        all_ids = df["證券代號"].tolist()
+    df = df[["stock_id", "turnover"]].copy()
+    df["stock_id"] = df["stock_id"].astype(str).str.zfill(4)
+    df["turnover"] = pd.to_numeric(df["turnover"].astype(str).str.replace(",", ""), errors="coerce")
 
-        if filter_type == "small_cap":
-            # 中小型股篩選：排除前 50 名大股、只取後段的股票
-            return all_ids[50:50+limit]
-        elif filter_type == "large_cap":
-            # 只取前幾名成交金額大的股票
-            return all_ids[:limit]
-        else:
-            return all_ids[:limit]
+    # 過濾成交金額大於 5000 萬元的股票
+    df = df[df["turnover"] > 50_000_000]
 
-    except Exception as e:
-        print(f"[price_fetcher] ⚠️ 熱門股讀取失敗：{e}")
-        return ["2330", "2317", "2454", "2303", "2882"][:limit]
+    # 排序後取前 N 名
+    df = df.sort_values(by="turnover", ascending=False).head(limit)
+    stock_ids = df["stock_id"].tolist()
+    return stock_ids
