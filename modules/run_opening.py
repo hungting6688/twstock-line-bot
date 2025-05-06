@@ -5,8 +5,8 @@ from modules.signal_analysis import analyze_stocks_with_signals
 def analyze_opening():
     return analyze_stocks_with_signals(
         mode="opening",
-        limit=5,           # 少量測試
-        min_score=3,
-        include_weak=True,
-        filter_type=None
+        limit=100,             # 掃描前 100 大熱門股
+        min_score=3,           # 推薦門檻低，適合短線切入
+        include_weak=True,     # 顯示極弱股
+        filter_type=None       # 不限制股型
     )
