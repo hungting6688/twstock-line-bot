@@ -5,56 +5,51 @@ STRATEGY_PROFILES = {
         "scan_limit": 100,
         "min_score": 3.5,
         "include_weak": True,
-        "indicators": {
-            "macd": 2,
-            "kd": 1.5,
-            "rsi": 1.5,
-            "ma": 1,
-            "eps": 0.5,
-            "dividend": 0.5
-        },
-        "comment": "開盤熱門股技術分析"
+        "weights": {
+            "macd": 1.2,
+            "kd": 1.0,
+            "rsi": 0.8,
+            "ma": 1.0,
+            "eps": 1.5,
+            "dividend": 1.5
+        }
     },
     "intraday": {
-        "scan_limit": 150,
-        "min_score": 4.5,
+        "scan_limit": 100,
+        "min_score": 3.0,
         "include_weak": True,
-        "indicators": {
-            "macd": 2,
-            "kd": 2,
-            "rsi": 1.5,
-            "ma": 1,
-            "eps": 0.5,
-            "dividend": 0.5
-        },
-        "comment": "盤中中小型股監控"
+        "weights": {
+            "macd": 1.2,
+            "kd": 1.2,
+            "rsi": 1.0,
+            "ma": 1.0,
+            "eps": 1.2
+        }
     },
     "dividend": {
-        "scan_limit": 200,
-        "min_score": 4.0,
-        "include_weak": True,
-        "indicators": {
-            "macd": 2,
-            "kd": 1.5,
-            "rsi": 1.5,
-            "ma": 1,
-            "eps": 1,
-            "dividend": 1
-        },
-        "comment": "午盤短線機會偵測"
+        "scan_limit": 120,
+        "min_score": 3.5,
+        "include_weak": False,
+        "weights": {
+            "macd": 1.0,
+            "kd": 1.0,
+            "rsi": 0.8,
+            "ma": 1.0,
+            "eps": 1.3,
+            "dividend": 1.7
+        }
     },
     "closing": {
-        "scan_limit": 500,
-        "min_score": 5.0,
+        "scan_limit": 300,
+        "min_score": 3.0,
         "include_weak": True,
-        "indicators": {
-            "macd": 2,
-            "kd": 1.5,
-            "rsi": 1.5,
-            "ma": 1,
-            "eps": 1,
-            "dividend": 1
-        },
-        "comment": "收盤中長線潛力股分析"
+        "weights": {
+            "macd": 1.3,
+            "kd": 1.2,
+            "rsi": 1.0,
+            "ma": 1.0,
+            "eps": 1.5,
+            "dividend": 1.5
+        }
     }
 }
