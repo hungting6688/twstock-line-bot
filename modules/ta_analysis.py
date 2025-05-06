@@ -1,4 +1,4 @@
-print("[ta_analysis] ✅ 最新修正版 v1.8 (修正 Series 判斷錯誤)")
+print("[ta_analysis] ✅ 最新修正版 v1.8 (修正 EPS 判斷錯誤與權重分析)")
 
 import yfinance as yf
 import pandas as pd
@@ -24,21 +24,21 @@ def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_dat
 
     for sid in stock_ids:
         try:
-            df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False, auto_adjust=False)
+            df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False)
             if df.empty or len(df) < 30:
                 continue
 
             df = df.dropna()
             close = df["Close"]
 
-            # --- MACD ---
+            # MACD
             ema12 = close.ewm(span=12, adjust=False).mean()
             ema26 = close.ewm(span=26, adjust=False).mean()
             dif = ema12 - ema26
             dea = dif.ewm(span=9, adjust=False).mean()
             macd_hist = dif - dea
 
-            # --- KD ---
+            # KD
             low_min = df["Low"].rolling(window=9).min()
             high_max = df["High"].rolling(window=9).max()
             denominator = (high_max - low_min).replace(0, np.nan)
@@ -46,7 +46,7 @@ def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_dat
             k = rsv.ewm(com=2).mean()
             d = k.ewm(com=2).mean()
 
-            # --- RSI ---
+            # RSI
             delta = close.diff()
             gain = delta.where(delta > 0, 0).rolling(window=14).mean()
             loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
@@ -54,7 +54,7 @@ def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_dat
             rsi = 100 - (100 / (1 + rs))
             rsi = rsi.fillna(50)
 
-            # --- 均線 ---
+            # MA
             ma5 = close.rolling(window=5).mean()
             ma20 = close.rolling(window=20).mean()
             ma60 = close.rolling(window=60).mean()
@@ -62,20 +62,17 @@ def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_dat
             score = 0
             comments = []
 
-            if indicators.get("macd", 0) > 0:
-                if macd_hist.iloc[-1] > 0.0 and dif.iloc[-1] > dea.iloc[-1]:
-                    score += indicators["macd"]
-                    comments.append("MACD 剛翻多")
+            if indicators.get("macd", 0) > 0 and macd_hist.iloc[-1] > 0 and dif.iloc[-1] > dea.iloc[-1]:
+                score += indicators["macd"]
+                comments.append("MACD 剛翻多")
 
-            if indicators.get("kd", 0) > 0:
-                if k.iloc[-1] > d.iloc[-1] and k.iloc[-1] < 60:
-                    score += indicators["kd"]
-                    comments.append("KD 黃金交叉")
+            if indicators.get("kd", 0) > 0 and k.iloc[-1] > d.iloc[-1] and k.iloc[-1] < 60:
+                score += indicators["kd"]
+                comments.append("KD 黃金交叉")
 
-            if indicators.get("rsi", 0) > 0:
-                if rsi.iloc[-1] < 30:
-                    score += indicators["rsi"]
-                    comments.append("RSI 超跌")
+            if indicators.get("rsi", 0) > 0 and rsi.iloc[-1] < 30:
+                score += indicators["rsi"]
+                comments.append("RSI 超跌")
 
             if indicators.get("ma", 0) > 0:
                 if close.iloc[-1] > ma5.iloc[-1]:
@@ -88,5 +85,37 @@ def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_dat
             if close.iloc[-1] < ma20.iloc[-1] and rsi.iloc[-1] < 40:
                 comments.append("中期偏弱")
 
+            # EPS
             if indicators.get("eps", 0) > 0 and sid in eps_data:
-                if eps_data[sid]["eps]()_
+                eps_val = eps_data[sid].get("eps")
+                if eps_val is not None and eps_val >= 2:
+                    score += indicators["eps"]
+                    comments.append(f"EPS 穩定（{eps_val}）")
+
+            # Dividend
+            if indicators.get("dividend", 0) > 0 and sid in eps_data:
+                div_val = eps_data[sid].get("dividend")
+                if div_val is not None and div_val >= 2:
+                    score += indicators["dividend"]
+                    comments.append(f"殖利率佳（{div_val}）")
+
+            is_weak = (
+                rsi.iloc[-1] < 30 and
+                close.iloc[-1] < ma5.iloc[-1] and
+                close.iloc[-1] < ma20.iloc[-1] and
+                close.iloc[-1] < ma60.iloc[-1]
+            )
+
+            suggestion = generate_suggestion_text(score, comments)
+
+            results[sid] = {
+                "score": round(score, 2),
+                "suggestion": suggestion,
+                "is_weak": is_weak
+            }
+
+        except Exception as e:
+            print(f"[ta_analysis] {sid} 分析失敗：{e}")
+            continue
+
+    return results
