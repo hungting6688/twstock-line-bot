@@ -1,121 +1,62 @@
-print("[ta_analysis] ✅ 最新修正版 v1.8 (修正 EPS 判斷錯誤與權重分析)")
+print("[ta_analysis] ✅ 最新修正版 v1.8（含白話建議）")
 
-import yfinance as yf
 import pandas as pd
-import numpy as np
 
-def generate_suggestion_text(score, comments):
-    if score >= 6:
-        prefix = "技術面偏多："
-        suffix = "，建議可考慮分批佈局或短線進場。"
-    elif score >= 4:
-        prefix = "技術面轉強："
-        suffix = "，建議可觀察是否有突破走勢再做進場。"
-    elif score >= 2:
-        prefix = "技術面普通："
-        suffix = "，建議暫不進場，可保守觀望。"
-    else:
-        prefix = "多數技術指標偏弱："
-        suffix = "，建議避開或保守等待轉強訊號。"
-    return prefix + " + ".join(comments) + suffix
+def analyze_technical_indicators(df: pd.DataFrame) -> dict:
+    try:
+        df = df.sort_index()
+        signals = {}
+        suggestion = []
 
-def analyze_technical_indicators(stock_ids: list[str], indicators: dict, eps_data: dict = {}) -> dict:
-    results = {}
+        # MA (5日 > 20日)
+        df["MA5"] = df["Close"].rolling(window=5).mean()
+        df["MA20"] = df["Close"].rolling(window=20).mean()
+        if df["MA5"].iloc[-1] > df["MA20"].iloc[-1]:
+            signals["ma"] = True
+            suggestion.append("短中期趨勢向上，可考慮分批佈局")
+        else:
+            signals["ma"] = False
 
-    for sid in stock_ids:
-        try:
-            df = yf.download(f"{sid}.TW", period="3mo", interval="1d", progress=False)
-            if df.empty or len(df) < 30:
-                continue
+        # RSI (>70 過熱)
+        delta = df["Close"].diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        avg_gain = gain.rolling(window=14).mean()
+        avg_loss = loss.rolling(window=14).mean()
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        current_rsi = rsi.iloc[-1]
+        signals["rsi"] = current_rsi
+        if current_rsi > 70:
+            suggestion.append("RSI > 70：價格偏高，建議觀望或分批出場")
+        elif current_rsi < 30:
+            suggestion.append("RSI < 30：超跌反彈機會，可留意進場時機")
 
-            df = df.dropna()
-            close = df["Close"]
+        # KD (K > D 為黃金交叉)
+        low_min = df["Low"].rolling(window=9).min()
+        high_max = df["High"].rolling(window=9).max()
+        rsv = (df["Close"] - low_min) / (high_max - low_min) * 100
+        df["K"] = rsv.ewm(com=2).mean()
+        df["D"] = df["K"].ewm(com=2).mean()
+        if df["K"].iloc[-1] > df["D"].iloc[-1]:
+            signals["kd"] = True
+            suggestion.append("KD 黃金交叉，短線轉強，可考慮進場")
+        else:
+            signals["kd"] = False
 
-            # MACD
-            ema12 = close.ewm(span=12, adjust=False).mean()
-            ema26 = close.ewm(span=26, adjust=False).mean()
-            dif = ema12 - ema26
-            dea = dif.ewm(span=9, adjust=False).mean()
-            macd_hist = dif - dea
+        # MACD (黃金交叉訊號)
+        ema12 = df["Close"].ewm(span=12).mean()
+        ema26 = df["Close"].ewm(span=26).mean()
+        macd_line = ema12 - ema26
+        signal_line = macd_line.ewm(span=9).mean()
+        if macd_line.iloc[-1] > signal_line.iloc[-1]:
+            signals["macd"] = True
+            suggestion.append("MACD 黃金交叉，多頭動能啟動，可考慮短期進場")
+        else:
+            signals["macd"] = False
 
-            # KD
-            low_min = df["Low"].rolling(window=9).min()
-            high_max = df["High"].rolling(window=9).max()
-            denominator = (high_max - low_min).replace(0, np.nan)
-            rsv = ((close - low_min) / denominator * 100).fillna(0)
-            k = rsv.ewm(com=2).mean()
-            d = k.ewm(com=2).mean()
-
-            # RSI
-            delta = close.diff()
-            gain = delta.where(delta > 0, 0).rolling(window=14).mean()
-            loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
-            rs = gain / loss.replace(0, np.nan)
-            rsi = 100 - (100 / (1 + rs))
-            rsi = rsi.fillna(50)
-
-            # MA
-            ma5 = close.rolling(window=5).mean()
-            ma20 = close.rolling(window=20).mean()
-            ma60 = close.rolling(window=60).mean()
-
-            score = 0
-            comments = []
-
-            if indicators.get("macd", 0) > 0 and macd_hist.iloc[-1] > 0 and dif.iloc[-1] > dea.iloc[-1]:
-                score += indicators["macd"]
-                comments.append("MACD 剛翻多")
-
-            if indicators.get("kd", 0) > 0 and k.iloc[-1] > d.iloc[-1] and k.iloc[-1] < 60:
-                score += indicators["kd"]
-                comments.append("KD 黃金交叉")
-
-            if indicators.get("rsi", 0) > 0 and rsi.iloc[-1] < 30:
-                score += indicators["rsi"]
-                comments.append("RSI 超跌")
-
-            if indicators.get("ma", 0) > 0:
-                if close.iloc[-1] > ma5.iloc[-1]:
-                    score += indicators["ma"] * 0.5
-                    comments.append("站上 5 日均線")
-                if close.iloc[-1] > ma20.iloc[-1]:
-                    score += indicators["ma"] * 0.5
-                    comments.append("站上 20 日均線")
-
-            if close.iloc[-1] < ma20.iloc[-1] and rsi.iloc[-1] < 40:
-                comments.append("中期偏弱")
-
-            # EPS
-            if indicators.get("eps", 0) > 0 and sid in eps_data:
-                eps_val = eps_data[sid].get("eps")
-                if eps_val is not None and eps_val >= 2:
-                    score += indicators["eps"]
-                    comments.append(f"EPS 穩定（{eps_val}）")
-
-            # Dividend
-            if indicators.get("dividend", 0) > 0 and sid in eps_data:
-                div_val = eps_data[sid].get("dividend")
-                if div_val is not None and div_val >= 2:
-                    score += indicators["dividend"]
-                    comments.append(f"殖利率佳（{div_val}）")
-
-            is_weak = (
-                rsi.iloc[-1] < 30 and
-                close.iloc[-1] < ma5.iloc[-1] and
-                close.iloc[-1] < ma20.iloc[-1] and
-                close.iloc[-1] < ma60.iloc[-1]
-            )
-
-            suggestion = generate_suggestion_text(score, comments)
-
-            results[sid] = {
-                "score": round(score, 2),
-                "suggestion": suggestion,
-                "is_weak": is_weak
-            }
-
-        except Exception as e:
-            print(f"[ta_analysis] {sid} 分析失敗：{e}")
-            continue
-
-    return results
+        signals["suggestions"] = suggestion
+        return signals
+    except Exception as e:
+        print(f"[ta_analysis] 技術指標計算錯誤：{e}")
+        return {}
