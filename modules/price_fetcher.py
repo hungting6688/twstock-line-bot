@@ -1,39 +1,36 @@
-# modules/price_fetcher.py
-print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
-
-import pandas as pd
 import requests
+import pandas as pd
 from io import StringIO
-import datetime
 
-def get_realtime_top_stocks(min_turnover=50000000):
+def get_realtime_top_stocks(limit=100):
+    print("[price_fetcher] ⚙️ 正在抓取即時熱門股資料")
+    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"
+
     try:
-        today = datetime.datetime.today().strftime("%Y%m%d")
-        url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={today}&type=ALL"
+        res = requests.get(url)
+        res.encoding = "big5"  # TWSE 是 big5 編碼
 
-        response = requests.get(url)
-        csv_data = "\n".join([line for line in response.text.splitlines() if line.count(",") > 6])
-        df = pd.read_csv(StringIO(csv_data))
+        csv_data = res.text
+        # 加上 on_bad_lines="skip" 以跳過錯誤行（pandas >= 1.3.0）
+        df = pd.read_csv(StringIO(csv_data), on_bad_lines="skip")
 
         df.columns = df.columns.str.strip()
-        df = df.rename(columns={"證券代號": "stock_id", "成交股數": "Volume", "收盤價": "Close"})
+        df = df.rename(columns={
+            "證券代號": "stock_id",
+            "成交股數": "volume",
+            "成交金額": "turnover",
+        })
 
-        df = df[["stock_id", "Volume", "Close"]].dropna()
-        df["Volume"] = pd.to_numeric(df["Volume"].astype(str).str.replace(",", ""), errors="coerce")
-        df["Close"] = pd.to_numeric(df["Close"].astype(str).str.replace(",", ""), errors="coerce")
-        df = df.dropna()
-
-        df["turnover"] = df["Volume"] * df["Close"]
+        df = df[["stock_id", "turnover"]].dropna()
+        df["turnover"] = pd.to_numeric(df["turnover"].astype(str).str.replace(",", ""), errors="coerce")
+        df = df.dropna(subset=["turnover"])
         df["stock_id"] = df["stock_id"].astype(str).str.zfill(4)
 
-        # 篩掉成交金額太小的
-        df = df[df["turnover"] >= min_turnover]
-
-        # 排除下市股票（代碼非數字者）但保留 ETF
-        df = df[df["stock_id"].str.match(r"^\d+$")]
-
-        top_stocks = df.sort_values(by="turnover", ascending=False).head(300)
+        # 排除成交金額為 0 的股票
+        df = df[df["turnover"] > 0]
+        top_stocks = df.sort_values("turnover", ascending=False).head(limit)
         return top_stocks["stock_id"].tolist()
+
     except Exception as e:
         print(f"[price_fetcher] ❌ 資料解析失敗：{e}")
         return []
