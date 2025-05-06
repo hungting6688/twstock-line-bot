@@ -22,8 +22,9 @@ def main(mode: str):
     else:
         print("❌ 不支援的模式，請使用 --mode=[opening|intraday|dividend|closing]")
         return
-    print("[LINE BOT] ✅ 推播成功")
+
     send_line_message(msg)
+    print("[LINE BOT] ✅ 推播成功")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
