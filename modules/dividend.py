@@ -1,10 +1,12 @@
+# modules/dividend.py
+
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 
 def analyze_dividend():
     print("[dividend] ✅ 午盤分析啟動")
     try:
-        df_result = analyze_stocks_with_signals(min_turnover=30_000_000, min_score=5)
+        df_result = analyze_stocks_with_signals(min_turnover=30_000_000, min_score=5, limit=150)
 
         if df_result.empty:
             message = "📉 午盤觀察：無短線機會股推薦，建議持續觀察。"
