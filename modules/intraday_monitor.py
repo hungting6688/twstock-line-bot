@@ -1,10 +1,12 @@
+# modules/intraday_monitor.py
+
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 
 def analyze_intraday():
     print("[intraday_monitor] ✅ 中盤分析啟動")
     try:
-        df_result = analyze_stocks_with_signals(min_turnover=50_000_000, min_score=6)
+        df_result = analyze_stocks_with_signals(min_turnover=50_000_000, min_score=6, limit=100)
         
         if df_result.empty:
             message = "📉 中盤時段：目前無明顯強勢股，建議觀望盤勢變化。"
