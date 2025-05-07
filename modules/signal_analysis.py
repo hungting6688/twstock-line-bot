@@ -6,10 +6,10 @@ from modules.price_fetcher import fetch_price_data
 from modules.eps_dividend_scraper import fetch_eps_dividend_data
 from modules.fundamental_scraper import fetch_fundamental_data
 
-def analyze_stocks_with_signals(min_turnover=50000000, min_score=5, eps_limit=20, limit=450):
+def analyze_stocks_with_signals(min_turnover=50_000_000, min_score=5, eps_limit=20, limit=450):
     print("[signal_analysis] ✅ 開始整合分析流程...")
 
-    # Step 1：熱門股價資料（含成交金額與檔數限制）
+    # Step 1：熱門股價資料
     print("[signal_analysis] ⏳ 擷取熱門股清單...")
     price_df = fetch_price_data(min_turnover=min_turnover, limit=limit)
 
@@ -20,7 +20,7 @@ def analyze_stocks_with_signals(min_turnover=50000000, min_score=5, eps_limit=20
     stock_ids = price_df['stock_id'].tolist()
     print(f"[signal_analysis] 🔍 共擷取到 {len(stock_ids)} 檔熱門股")
 
-    # Step 2：EPS / 殖利率 / YTD 報酬率（上限）
+    # Step 2：EPS / 殖利率 / YTD 報酬率
     print(f"[signal_analysis] ⏳ 擷取 EPS 與殖利率資料（最多 {eps_limit} 檔）...")
     eps_df = fetch_eps_dividend_data(stock_ids, limit=eps_limit)
 
@@ -33,7 +33,7 @@ def analyze_stocks_with_signals(min_turnover=50000000, min_score=5, eps_limit=20
     df = price_df.merge(eps_df, on='stock_id', how='left') \
                  .merge(fund_df, on='stock_id', how='left')
 
-    # Step 5：缺失處理
+    # Step 5：處理缺失值
     df['eps_growth'] = df['eps_growth'].fillna(False)
     df['dividend_yield'] = df['dividend_yield'].fillna(0.0)
     df['ytd_return'] = df['ytd_return'].fillna(0.0)
