@@ -1,36 +1,34 @@
-import requests
+# modules/fundamental_scraper.py
+
 import pandas as pd
+import requests
 from io import StringIO
 
 def fetch_fundamental_data():
-    print("[fundamental_scraper] 擷取法人買賣超資料...")
-
-    url = "https://www.twse.com.tw/fund/BFI82U?response=html"
-
     try:
-        res = requests.get(url, timeout=10)
-        res.encoding = "utf-8"
+        url = "https://www.twse.com.tw/fund/T86?response=csv&date=&selectType=ALL"
+        response = requests.get(url)
+        response.encoding = "utf-8"
+        raw_csv = response.text
 
-        # 嘗試用 read_html 擷取表格
-        tables = pd.read_html(res.text)
+        # 嘗試解析所有表格
+        tables = pd.read_html(StringIO(raw_csv), encoding='utf-8')
         print(f"[fundamental_scraper] ⚙️ 擷取表格數量：{len(tables)}")
 
-        df = None
+        # 自動偵測含法人資料的合法表格
         for i, t in enumerate(tables):
-            if "證券代號" in t.columns.tolist()[0] or "證券名稱" in t.columns.tolist():
+            colnames = t.columns.astype(str).tolist()
+            if any("代號" in c or "名稱" in c for c in colnames) and any("三大法人" in c or "合計" in c for c in colnames):
                 df = t
                 break
-
-        if df is None:
+        else:
             raise ValueError("找不到包含法人資料的合法表格")
 
-        # 標準化欄位
-        df.columns = df.columns.str.strip()
-        df = df.rename(columns={
-            df.columns[0]: "stock_id",
-            df.columns[1]: "stock_name",
-            df.columns[-1]: "buy_total"  # 三大法人買賣超合計
-        })
+        # 清洗與轉換欄位
+        df.columns = [str(col).strip() for col in df.columns]
+        df = df.rename(columns={df.columns[0]: "stock_id", df.columns[1]: "stock_name"})
+        df = df[["stock_id", "stock_name", df.columns[-1]]]
+        df.columns = ["stock_id", "stock_name", "buy_total"]
 
         df["stock_id"] = df["stock_id"].astype(str).str.zfill(4)
         df["buy_total"] = pd.to_numeric(df["buy_total"].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
