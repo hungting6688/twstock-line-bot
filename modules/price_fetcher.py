@@ -1,41 +1,26 @@
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
 from io import StringIO
+from datetime import datetime
 
 def fetch_price_data(min_turnover=50000000, limit=450):
-    print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
+    print("[price_fetcher] ✅ 使用 TWSE CSV 版本")
 
-    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=html&date=&type=ALL"
+    today_str = datetime.today().strftime("%Y%m%d")
+    url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={today_str}&type=ALL"
+
     try:
         res = requests.get(url, timeout=10)
-        res.encoding = "utf-8"
-        soup = BeautifulSoup(res.text, "html.parser")
+        res.encoding = "big5"  # TWSE 使用 big5 編碼
 
-        tables = soup.find_all("table")
-        found_df = None
+        # 濾掉前面非資料列
+        csv_text = "\n".join([line for line in res.text.splitlines() if line.count(",") > 10])
 
-        for idx, table in enumerate(tables):
-            try:
-                df_try = pd.read_html(StringIO(str(table)), flavor="bs4")[0]
-                df_try.columns = df_try.columns.str.replace(r"\s", "", regex=True)
+        df = pd.read_csv(StringIO(csv_text))
+        df.columns = df.columns.str.replace(r"\s", "", regex=True)
 
-                # debug: 印出欄位名稱
-                print(f"[price_fetcher] 表格 {idx+1} 欄位：{list(df_try.columns)}")
-
-                if ("證券代號" in df_try.columns or "代號" in df_try.columns) and \
-                   ("成交金額(千元)" in df_try.columns or "成交金額" in df_try.columns):
-                    found_df = df_try
-                    break
-            except Exception as e:
-                continue
-
-        if found_df is None:
-            print("[price_fetcher] ❌ 找不到包含成交金額的表格（請參考上方欄位列表）")
-            return pd.DataFrame()
-
-        # 統一欄位命名
-        df = found_df.rename(columns={
+        # 欄位標準化
+        df = df.rename(columns={
             "證券代號": "stock_id", "代號": "stock_id",
             "證券名稱": "stock_name", "名稱": "stock_name",
             "成交金額(千元)": "turnover", "成交金額": "turnover"
@@ -45,7 +30,8 @@ def fetch_price_data(min_turnover=50000000, limit=450):
         df["turnover"] = df["turnover"].astype(str).str.replace(",", "").astype(float) * 1000
         df = df[df["turnover"] >= min_turnover]
 
-        df = df[df["stock_id"].astype(str).str.match(r"^[0-9]{4}$|^00[0-9]{2}$|^006[0-9]{2}[LRU]?$")]
+        # 只抓股票或 ETF（含字母結尾）
+        df = df[df["stock_id"].astype(str).str.match(r"^[0-9]{4}[A-Z]?$")]
         df = df.sort_values(by="turnover", ascending=False).head(limit).reset_index(drop=True)
 
         print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
