@@ -1,5 +1,3 @@
-# modules/run_opening.py
-
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 
@@ -10,18 +8,20 @@ def analyze_opening():
         df_result = analyze_stocks_with_signals(
             min_turnover=50_000_000,
             min_score=5,
-            limit=100  # 開盤時段掃描前 100 檔熱門股
+            limit=100,
+            fallback_top_n=5
         )
 
         if df_result.empty:
-            message = "📉 今日無符合條件的推薦股，請持續觀察市場動態。"
+            message = "📉 今日無推薦或觀察股，請持續關注市場。"
             send_line_message(message)
             return message
 
-        lines = ["📈 今日開盤推薦股：\n"]
+        lines = ["📈 今日開盤推薦結果：\n"]
         for _, row in df_result.iterrows():
+            label = "🌟 推薦股" if row["score"] >= 5 else "👀 觀察股"
             lines.append(
-                f"✅ {row['stock_id']} {row['stock_name']}｜分數：{row['score']} 分\n"
+                f"{label}｜{row['stock_id']} {row['stock_name']}｜分數：{row['score']} 分\n"
                 f"➡️ 原因：{row['reasons']}\n"
                 f"💡 建議：{row['suggestion']}\n"
             )
