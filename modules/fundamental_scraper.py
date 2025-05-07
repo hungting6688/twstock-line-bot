@@ -1,38 +1,45 @@
 # modules/fundamental_scraper.py
+
 import pandas as pd
 import requests
-from io import StringIO
+from bs4 import BeautifulSoup
 
 def fetch_fundamental_data():
-    url = "https://www.twse.com.tw/fund/T86?response=html&date=&selectType=ALLBUT0999"
     print("[fundamental_scraper] 擷取法人買賣超資料...")
 
+    url = "https://www.twse.com.tw/zh/page/trading/fund/T86.html"
     try:
         res = requests.get(url, timeout=10)
-        tables = pd.read_html(StringIO(res.text))
+        res.encoding = "utf-8"
+        soup = BeautifulSoup(res.text, "html.parser")
+        tables = pd.read_html(res.text)
+
         print(f"[fundamental_scraper] ⚙️ 擷取表格數量：{len(tables)}")
 
-        # 嘗試找出包含「代號」與「法人買超金額」的表格
-        df = None
-        for t in tables:
-            cols = [str(c) for c in t.columns]
-            if any("代號" in c or "名稱" in c for c in cols) and any("合計" in c or "三大法人" in c for c in cols):
-                df = t
+        # 嘗試抓出第一個有「證券代號」的表格
+        target_df = None
+        for df in tables:
+            if any("代號" in str(col) for col in df.columns):
+                target_df = df.copy()
                 break
 
-        if df is None:
+        if target_df is None:
             raise ValueError("找不到包含法人資料的合法表格")
 
-        df.columns = df.columns.astype(str)
-        df = df.rename(columns={
-            df.columns[0]: "stock_id",
-            df.columns[1]: "stock_name",
-            df.columns[-1]: "buy_total"
+        # 標準化欄位
+        target_df.columns = target_df.columns.astype(str)
+        target_df.columns = target_df.columns.str.strip()
+        target_df = target_df.rename(columns={
+            target_df.columns[0]: "stock_id",
+            target_df.columns[1]: "stock_name",
+            target_df.columns[-1]: "buy_total"
         })
 
+        df = target_df[["stock_id", "buy_total"]].copy()
         df["stock_id"] = df["stock_id"].astype(str).str.zfill(4)
-        df["buy_total"] = pd.to_numeric(df["buy_total"], errors="coerce").fillna(0).astype(int)
-        df = df[["stock_id", "buy_total"]]
+        df["buy_total"] = pd.to_numeric(df["buy_total"].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
+
+        print(f"[fundamental_scraper] ✅ 擷取完成，共 {len(df)} 筆")
         return df
 
     except Exception as e:
