@@ -44,11 +44,26 @@ def fetch_fundamental_data():
 
 
 # ✅ 問題二修正：run_opening 負責推播，main.py 不要重複推播
-# ✅ 問題三＆四：加入技術指標每一項是否命中的 debug log（示範一小段）
+# ✅ 問題三＆四：加入技術指標每一項是否命中的 debug log（完整版本）
 
-# 範例片段（放在 ta_analysis.py 裡）
-# print(f"[debug] {row['stock_id']} RSI={row.get('rsi_14')}, KD={row.get('kdj_k')}/{row.get('kdj_d')}, MA5={row.get('ma5')}...")
+# 範例片段（放在 ta_analysis.py 的 calculate_technical_scores 中每一項）
 
-# 也可以加：print(f"[ta_analysis] 技術得分：{score}, 原因：{reasons}")
-
-# ✅ 推薦做法：將這些 debug log 限制為 debug 模式開啟時才顯示，避免太多輸出
+# def calculate_technical_scores(df):
+#     for _, row in df.iterrows():
+#         print(f"[debug] 分析 {row['stock_id']} {row.get('stock_name', '')}")
+#         if row.get("macd_hist", 0) > 0 and row.get("macd", 0) > row.get("signal", 0):
+#             print("  ✅ 命中 MACD 黃金交叉")
+#         if row.get("kdj_k", 0) > row.get("kdj_d", 0) and row.get("kdj_k", 0) < 40:
+#             print("  ✅ 命中 KD 黃金交叉")
+#         if row.get("rsi_14", 0) > 50 and row.get("rsi_14", 0) > row.get("rsi_14_prev", 0):
+#             print("  ✅ 命中 RSI 走強")
+#         if row.get("close", 0) > row.get("ma5", 0) and row.get("close", 0) > row.get("ma20", 0) and row.get("close", 0) > row.get("ma60", 0):
+#             print("  ✅ 命中均線多頭排列")
+#         if row.get("close", 0) > row.get("bb_middle", 0):
+#             print("  ✅ 命中布林中線上揚")
+#         if row.get("buy_total", 0) > 0:
+#             print("  ✅ 命中法人買超")
+#         if row.get("eps_growth", False):
+#             print("  ✅ 命中 EPS 成長")
+#         if row.get("dividend_yield", 0) >= 3 and row.get("ytd_return", 0) > 0:
+#             print("  ✅ 命中高殖利率")
