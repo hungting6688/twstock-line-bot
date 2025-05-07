@@ -7,7 +7,11 @@ def analyze_opening():
     print("[run_opening] 開始執行開盤推薦分析...")
 
     try:
-        df_result = analyze_stocks_with_signals(min_turnover=50_000_000, min_score=5, limit=100)
+        df_result = analyze_stocks_with_signals(
+            min_turnover=50_000_000,
+            min_score=5,
+            limit=100  # 開盤時段掃描前 100 檔熱門股
+        )
 
         if df_result.empty:
             message = "📉 今日無符合條件的推薦股，請持續觀察市場動態。"
