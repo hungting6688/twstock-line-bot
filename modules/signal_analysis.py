@@ -1,17 +1,18 @@
+# modules/signal_analysis.py
+
 import pandas as pd
 from modules.ta_analysis import calculate_technical_scores
 from modules.price_fetcher import fetch_price_data
 from modules.eps_dividend_scraper import fetch_eps_dividend_data
 from modules.fundamental_scraper import fetch_fundamental_data
 
-def analyze_stocks_with_signals(min_turnover=50000000, min_score=5, eps_limit=20):
+def analyze_stocks_with_signals(min_turnover=50000000, min_score=5, eps_limit=20, limit=450):
     print("[signal_analysis] ✅ 開始整合分析流程...")
 
-    # Step 1：熱門股價資料
+    # Step 1：熱門股價資料（含成交金額與檔數限制）
     print("[signal_analysis] ⏳ 擷取熱門股清單...")
-    price_df = fetch_price_data(min_turnover=min_turnover)
-    
-    # 若熱門股資料為空，提前返回
+    price_df = fetch_price_data(min_turnover=min_turnover, limit=limit)
+
     if price_df.empty:
         print("[signal_analysis] ⚠️ 熱門股清單為空，終止分析")
         return pd.DataFrame()
@@ -19,7 +20,7 @@ def analyze_stocks_with_signals(min_turnover=50000000, min_score=5, eps_limit=20
     stock_ids = price_df['stock_id'].tolist()
     print(f"[signal_analysis] 🔍 共擷取到 {len(stock_ids)} 檔熱門股")
 
-    # Step 2：EPS / 殖利率 / YTD 報酬率（有數量限制）
+    # Step 2：EPS / 殖利率 / YTD 報酬率（上限）
     print(f"[signal_analysis] ⏳ 擷取 EPS 與殖利率資料（最多 {eps_limit} 檔）...")
     eps_df = fetch_eps_dividend_data(stock_ids, limit=eps_limit)
 
@@ -38,14 +39,11 @@ def analyze_stocks_with_signals(min_turnover=50000000, min_score=5, eps_limit=20
     df['ytd_return'] = df['ytd_return'].fillna(0.0)
     df['buy_total'] = df['buy_total'].fillna(0)
 
-    # Step 6：法人買超加分（若法人淨買超，則加分）
-    df['score'] = df.apply(lambda row: row['score'] + 1 if row['buy_total'] > 0 else row['score'], axis=1)
-
-    # Step 7：技術分析與評分
+    # Step 6：技術分析與評分
     print("[signal_analysis] 📊 計算技術分數與投資建議...")
     final_df = calculate_technical_scores(df)
 
-    # Step 8：選出推薦股票
+    # Step 7：選出推薦股票
     recommended = final_df[final_df['score'] >= min_score] \
                     .sort_values(by='score', ascending=False) \
                     .reset_index(drop=True)
