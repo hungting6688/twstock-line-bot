@@ -23,8 +23,7 @@ def main(mode: str):
         return
 
     if msg:
-        send_line_message(msg)
-        print("[LINE BOT] ✅ 推播成功")
+        print("[main] ⚠️ 分析模組已自行推播，無需重複發送")
     else:
         print("[main] ⚠️ 無推播內容")
 
