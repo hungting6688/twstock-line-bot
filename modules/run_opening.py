@@ -1,5 +1,3 @@
-# modules/run_opening.py
-
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 
@@ -7,12 +5,8 @@ def analyze_opening():
     print("[run_opening] 開始執行開盤推薦分析...")
 
     try:
-        df_result = analyze_stocks_with_signals(
-            min_turnover=50_000_000,
-            min_score=5,
-            eps_limit=200,
-            stock_limit=100  # ✅ 這裡可根據時段需求調整
-        )
+        # ✅ 使用 mode 讓 signal_analysis 自行載入正確策略參數
+        df_result = analyze_stocks_with_signals(mode="opening")
 
         if df_result is None or df_result.empty:
             message = "📉 今日無符合條件的推薦股，請持續觀察市場動態。"
