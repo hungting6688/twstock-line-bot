@@ -1,53 +1,39 @@
-import pandas as pd
+# modules/price_fetcher.py
+print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
+
 import requests
-from bs4 import BeautifulSoup
-from io import StringIO
+import pandas as pd
 
-def fetch_price_data(min_turnover=50_000_000, limit=450):
-    print("[price_fetcher] 載入當日股價與成交金額...")
-
-    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=html&date=&type=ALL"
+def get_top_stocks(limit=100, filter_type=None):
     try:
+        url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=&type=ALL"
         res = requests.get(url, timeout=10)
-        res.encoding = "utf-8"
+        data = res.json()
 
-        soup = BeautifulSoup(res.text, "html.parser")
-        tables = soup.find_all("table")
+        found = False
+        for table in data.get("tables", []):
+            df = pd.DataFrame(table.get("data", []), columns=table.get("fields", []))
+            if "證券代號" in df.columns and "成交金額" in df.columns:
+                found = True
+                break
 
-        valid_dfs = []
-        for table in tables:
-            try:
-                df = pd.read_html(StringIO(str(table)), flavor="bs4")[0]
-                if "證券代號" in df.columns or "代號" in df.columns:
-                    valid_dfs.append(df)
-            except Exception:
-                continue
+        if not found:
+            raise ValueError("無法找到包含成交金額的表格")
 
-        if not valid_dfs:
-            raise ValueError("找不到包含成交金額的表格")
+        df["成交金額"] = pd.to_numeric(df["成交金額"].str.replace(",", ""), errors="coerce")
+        df = df.dropna(subset=["成交金額"])
+        df = df.sort_values(by="成交金額", ascending=False)
 
-        df = pd.concat(valid_dfs, ignore_index=True)
+        df["證券代號"] = df["證券代號"].astype(str)
+        all_ids = df["證券代號"].tolist()
 
-        # 標準欄位名處理
-        df.columns = df.columns.str.replace("\s", "", regex=True)
-        df = df.rename(columns={
-            "證券代號": "stock_id",
-            "證券名稱": "stock_name",
-            "成交金額(千元)": "turnover"
-        })
-
-        df = df[["stock_id", "stock_name", "成交金額(千元)"]].rename(columns={"成交金額(千元)": "turnover"})
-        df = df.dropna()
-        df["turnover"] = df["turnover"].astype(str).str.replace(",", "").astype(float) * 1000  # 換成元
-        df = df[df["turnover"] >= min_turnover]
-
-        # 排除無效代號、非數字或ETF之類字樣無 stock_name 的
-        df = df[df["stock_id"].astype(str).str.match(r"^[0-9]{4}$|^00[0-9]{2}$|^006[0-9]{2}[LRU]?$")]
-
-        df = df.sort_values(by="turnover", ascending=False).head(limit).reset_index(drop=True)
-        print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
-        return df
+        if filter_type == "small_cap":
+            return all_ids[50:50 + limit]
+        elif filter_type == "large_cap":
+            return all_ids[:limit]
+        else:
+            return all_ids[:limit]
 
     except Exception as e:
-        print(f"[price_fetcher] ❌ 下載或解析失敗: {e}")
-        return pd.DataFrame()
+        print(f"[price_fetcher] ⚠️ 熱門股讀取失敗：{e}")
+        return ["2330", "2317", "2454", "2303", "2882"][:limit]
