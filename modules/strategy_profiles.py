@@ -1,65 +1,59 @@
 # modules/strategy_profiles.py
 
-print("[strategy_profiles] ✅ 已載入策略設定檔（含權重）")
+def get_strategy_profile(mode="opening"):
+    """
+    根據不同分析時段，回傳各技術/基本面指標的評分權重與掃描數量。
+    """
 
-STRATEGY_CONFIGS = {
-    "opening": {
-        "limit": 100,
-        "min_score": 3.5,
-        "include_weak": False,
-        "weights": {
-            "ma": 0.5,
-            "macd": 1.5,
-            "kd": 1.0,
-            "rsi": 1.0,
-            "boll": 0.5,
-            "eps": 1.5,
-            "dividend": 1.5
-        }
-    },
-    "intraday": {
-        "limit": 100,
-        "min_score": 3.0,
-        "include_weak": True,
-        "weights": {
-            "ma": 0.5,
-            "macd": 1.2,
-            "kd": 1.2,
-            "rsi": 1.0,
-            "boll": 0.5,
-            "eps": 1.0,
-            "dividend": 1.0
-        }
-    },
-    "dividend": {
-        "limit": 150,
-        "min_score": 2.8,
-        "include_weak": True,
-        "weights": {
-            "ma": 0.5,
-            "macd": 1.2,
-            "kd": 1.0,
-            "rsi": 0.8,
-            "boll": 0.5,
-            "eps": 1.0,
-            "dividend": 2.0
-        }
-    },
-    "closing": {
-        "limit": 450,
-        "min_score": 3.2,
-        "include_weak": True,
-        "weights": {
-            "ma": 0.7,
-            "macd": 1.5,
-            "kd": 1.0,
-            "rsi": 1.0,
-            "boll": 0.5,
-            "eps": 2.0,
-            "dividend": 1.5
-        }
+    base_profile = {
+        # 技術指標評分權重
+        "macd": 2.0,
+        "kdj": 2.0,
+        "rsi": 1.5,
+        "ma": 2.0,
+        "bollinger": 1.5,
+        # 基本面與法人加分
+        "buy_total": 0.5,
+        "eps_growth": 0.5,
+        "dividend_yield": 0.5,
+
+        # 推薦條件
+        "min_score": 5,
+
+        # 資料掃描數量（熱門股與 EPS）
+        "price_limit": 100,
+        "eps_limit": 100,
+
+        # 額外參數
+        "include_weak": True
     }
-}
 
-def get_strategy(mode: str):
-    return STRATEGY_CONFIGS.get(mode, STRATEGY_CONFIGS["opening"])
+    if mode == "opening":
+        base_profile.update({
+            "min_score": 5,
+            "price_limit": 100,
+            "eps_limit": 100
+        })
+
+    elif mode == "intraday":
+        base_profile.update({
+            "min_score": 4.5,
+            "price_limit": 150,
+            "eps_limit": 150
+        })
+
+    elif mode == "dividend":
+        base_profile.update({
+            "min_score": 4.5,
+            "price_limit": 200,
+            "eps_limit": 200
+        })
+
+    elif mode == "closing":
+        base_profile.update({
+            "min_score": 4,
+            "price_limit": 300,
+            "eps_limit": 300
+        })
+
+    return base_profile
