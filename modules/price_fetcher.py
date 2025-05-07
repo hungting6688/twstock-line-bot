@@ -34,7 +34,6 @@ def fetch_price_data(min_turnover=50000000, limit=450):
         df = pd.read_csv(StringIO(csv_text))
         df.columns = df.columns.str.replace(r"\s", "", regex=True)
 
-        # 自動偵測成交金額欄位
         turnover_col = next((col for col in df.columns if "成交金額" in col), None)
         if not turnover_col:
             raise ValueError("找不到成交金額欄位")
@@ -46,10 +45,12 @@ def fetch_price_data(min_turnover=50000000, limit=450):
         })
 
         df = df[["stock_id", "stock_name", "turnover"]].dropna()
-        df["turnover"] = df["turnover"].astype(str).str.replace(",", "").astype(float) * 1000
-        df = df[df["turnover"] >= min_turnover]
+        df["turnover"] = df["turnover"].astype(str).str.replace(",", "", regex=False).astype(float) * 1000
 
+        # 過濾成交金額與合法股票代號（4碼數字開頭，可含英文字母）
+        df = df[df["turnover"] >= min_turnover]
         df = df[df["stock_id"].astype(str).str.match(r"^[0-9]{4}[A-Z]?$")]
+
         df = df.sort_values(by="turnover", ascending=False).head(limit).reset_index(drop=True)
 
         print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
