@@ -83,9 +83,12 @@ def analyze_stocks_with_signals(mode="opening"):
         recommended["label"] = "👀 觀察股"
         print("[signal_analysis] ⚠️ 無推薦股票，顯示觀察股供參考")
 
-    # 加入極弱股提醒
-    weak_stocks = scored_df[scored_df.get("weak_signal", 0) >= 2] \
-        .sort_values(by="weak_signal", ascending=False).head(2).copy()
+    # 加入極弱股提醒（防止欄位不存在錯誤）
+    if "weak_signal" in scored_df.columns:
+        weak_stocks = scored_df[scored_df["weak_signal"] >= 2] \
+            .sort_values(by="weak_signal", ascending=False).head(2).copy()
+    else:
+        weak_stocks = pd.DataFrame()
 
     if not weak_stocks.empty:
         weak_stocks["label"] = "⚠️ 走弱股"
