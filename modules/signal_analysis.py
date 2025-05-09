@@ -91,7 +91,9 @@ def analyze_stocks_with_signals(mode="opening"):
         weak_stocks["label"] = "⚠️ 走弱股"
         weak_stocks["suggestion"] = "⚠️ 技術結構轉弱，建議暫停操作"
         print(f"[signal_analysis] 🚨 偵測到 {len(weak_stocks)} 檔走弱股")
+        combined = pd.concat([recommended, weak_stocks], ignore_index=True)
+    else:
+        combined = recommended
 
-        return pd.concat([recommended, weak_stocks], ignore_index=True)
-
-    return recommended
+    # 🔥 安全回傳，刪除內部欄位
+    return combined.drop(columns=["weak_signal"], errors="ignore")
