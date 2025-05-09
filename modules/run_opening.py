@@ -1,4 +1,4 @@
-# ✅ 最穩定修正版 run_opening.py（完全防止 False crash）
+# ✅ 終極穩定版 run_opening.py（完全防止 KeyError(False)）
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 from modules.strategy_profiles import get_strategy_profile
@@ -25,7 +25,7 @@ def analyze_opening():
         lines = ["📈 今日開盤推薦結果：", sentiment_note]
 
         for _, row in df_result.iterrows():
-            # 強制轉字串避免 False crash
+            # 強制轉為字串，避免布林值錯誤
             label = str(row.get("label") or "📌")
             stock_id = str(row.get("stock_id") or "")
             stock_name = str(row.get("stock_name") or "")
@@ -33,6 +33,7 @@ def analyze_opening():
             reasons = str(row.get("reasons") or "-")
             suggestion = str(row.get("suggestion") or "-")
 
+            # ⚠️ 不可用 row[label] 這類錯誤行為！label 只是顯示用
             lines.append(
                 f"{label}｜{stock_id} {stock_name}｜分數：{score} 分\n"
                 f"➡️ 原因：{reasons}\n"
