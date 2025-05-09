@@ -14,24 +14,25 @@ def calculate_technical_scores(df, **config):
         score = 0.0
         reasons = []
         suggestion = ""
+        label = "👀 觀察股"
 
-        # --- 技術指標評分 ---
+        stock_id = row["stock_id"]
+        stock_name = row.get("stock_name", "")
+        is_etf = str(row.get("is_etf", "")).lower() == "true"
+
+        # --- 技術評分 ---
         if row.get("macd_signal", False):
             score += weights.get("macd", 0)
             reasons.append("MACD黃金交叉")
-
         if row.get("kdj_signal", False):
             score += weights.get("kdj", 0)
             reasons.append("KD黃金交叉")
-
         if row.get("rsi_signal", False):
             score += weights.get("rsi", 0)
             reasons.append("RSI走強")
-
         if row.get("ma_signal", False):
             score += weights.get("ma", 0)
             reasons.append("站上均線")
-
         if row.get("bollinger_signal", False):
             score += weights.get("bollinger", 0)
             reasons.append("布林通道偏多")
@@ -49,9 +50,12 @@ def calculate_technical_scores(df, **config):
             score += weights.get("eps_growth", 0)
             reasons.append("EPS成長")
 
-        # --- 殖利率條件式加分 ---
+        # --- 殖利率加分（條件式） ---
         if dividend_yield >= 3 and row.get("ytd_return", 0) > 0:
-            if conditional_dividend:
+            if is_etf:  # ETF 例外條件：不需 EPS
+                score += weights.get("dividend_yield", 0)
+                reasons.append("高殖利率（ETF）")
+            elif conditional_dividend:
                 if eps_growth or buy_total > 0:
                     score += weights.get("dividend_yield", 0)
                     reasons.append("高殖利率")
@@ -62,7 +66,7 @@ def calculate_technical_scores(df, **config):
                 score += weights.get("dividend_yield", 0)
                 reasons.append("高殖利率")
 
-        # --- 冷門股降分、小型股處理 ---
+        # --- 冷門股降分、小型股補貼 ---
         if suppress_low_volume and (
             row.get("avg_volume", 0) < 1000 or row.get("market_cap", 0) < 10_000_000_000
         ):
@@ -75,25 +79,28 @@ def calculate_technical_scores(df, **config):
             score += 0.3
             reasons.append("大型股加分")
 
-        # --- 分數上限 ---
+        # --- 分數限制 ---
         score = min(score, limit_score)
+        rounded_score = round(score, 2)
 
-        # --- 白話建議 ---
-        if score >= 7:
+        # --- 白話建議優化（新分數段） ---
+        if rounded_score >= 6:
             suggestion = "建議立即列入關注清單"
-        elif score >= 5:
-            suggestion = "建議密切觀察"
-        elif score >= 3:
-            suggestion = "建議暫不進場"
+            label = "✅ 推薦股"
+        elif rounded_score >= 4.5:
+            suggestion = "建議密切觀察（指標強但略有疑慮）"
+        elif rounded_score >= 3:
+            suggestion = "技術轉強但籌碼或流動性不足，保守觀望"
         else:
             suggestion = "不建議操作"
 
         result.append({
-            "stock_id": row["stock_id"],
-            "stock_name": row.get("stock_name", ""),
-            "score": round(score, 2),
+            "stock_id": stock_id,
+            "stock_name": stock_name,
+            "score": rounded_score,
             "reasons": "、".join(reasons),
-            "suggestion": suggestion
+            "suggestion": suggestion,
+            "label": label
         })
 
     df_result = pd.DataFrame(result)
