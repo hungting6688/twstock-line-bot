@@ -3,6 +3,7 @@ import pandas as pd
 def calculate_technical_scores(df, **weights):
     print("[ta_analysis] ✅ 開始評分")
     result = []
+    recommend_min_score = weights.get("recommend_min", 6.0)
 
     for _, row in df.iterrows():
         score = 0.0
@@ -44,7 +45,7 @@ def calculate_technical_scores(df, **weights):
             reasons.append("高殖利率")
 
         # 白話建議
-        if score >= 7:
+        if score >= recommend_min_score:
             suggestion = "建議立即列入關注清單"
         elif score >= 5:
             suggestion = "建議密切觀察"
