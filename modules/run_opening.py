@@ -1,4 +1,4 @@
-# ✅ 修正版 run_opening.py（避免 False 錯誤 + 推播穩定）
+# ✅ 最終版 run_opening.py（完全修正 KeyError(False)）
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 from modules.strategy_profiles import get_strategy_profile
@@ -25,12 +25,12 @@ def analyze_opening():
         lines = ["📈 今日開盤推薦結果：", sentiment_note]
 
         for _, row in df_result.iterrows():
-            label = str(row.get("label", "📌"))
-            stock_id = str(row.get("stock_id", "-"))
-            name = str(row.get("stock_name", ""))
-            score = str(row.get("score", "-"))
-            reasons = str(row.get("reasons", "-"))
-            suggestion = str(row.get("suggestion", "-"))
+            label = str(row.get("label") or "📌")
+            stock_id = str(row.get("stock_id") or "-")
+            name = str(row.get("stock_name") or "")
+            score = str(row.get("score") or "-")
+            reasons = str(row.get("reasons") or "-")
+            suggestion = str(row.get("suggestion") or "-")
 
             lines.append(
                 f"{label}｜{stock_id} {name}｜分數：{score} 分\n"
