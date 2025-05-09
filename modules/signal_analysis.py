@@ -1,4 +1,3 @@
-# ✅ 修正版 signal_analysis.py
 import pandas as pd
 from modules.ta_analysis import calculate_technical_scores
 from modules.ta_generator import generate_technical_signals
@@ -95,5 +94,11 @@ def analyze_stocks_with_signals(mode="opening"):
         combined = pd.concat([recommended, weak_stocks], ignore_index=True)
     else:
         combined = recommended
+
+    # ✅ 最終保險：確保 label 欄位為字串（避免 downstream crash）
+    if "label" in combined.columns:
+        combined["label"] = combined["label"].fillna("📌").astype(str)
+    else:
+        combined["label"] = "📌"
 
     return combined.drop(columns=["weak_signal"], errors="ignore")
