@@ -1,10 +1,10 @@
-# ✅ price_fetcher.py（強化欄位解析與除錯）
+# ✅ price_fetcher.py（調降門檻 + 加入 debug 顯示熱門股）
 import pandas as pd
 import requests
 from io import StringIO
 from datetime import datetime
 
-def fetch_price_data(min_turnover=40000000, limit=100, mode="opening", strategy=None):
+def fetch_price_data(min_turnover=10_000_000, limit=100, mode="opening", strategy=None):
     print("[price_fetcher] ✅ 使用 TWSE CSV 報表穩定解析版本")
     today = datetime.today().strftime("%Y%m%d")
     url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={today}&type=ALLBUT0999"
@@ -16,7 +16,6 @@ def fetch_price_data(min_turnover=40000000, limit=100, mode="opening", strategy=
         cleaned_csv = "\n".join(lines)
         df = pd.read_csv(StringIO(cleaned_csv))
 
-        # 清理欄位名稱與空白
         df.columns = df.columns.str.strip()
         print("[price_fetcher] 欄位名稱：", df.columns.tolist())
 
@@ -30,17 +29,16 @@ def fetch_price_data(min_turnover=40000000, limit=100, mode="opening", strategy=
 
         df = df[df["stock_id"].astype(str).str.isnumeric()]
 
-        # 轉換數值欄位
         for col in ["close", "volume", "turnover"]:
             df[col] = df[col].astype(str).str.replace(",", "", regex=False).replace("--", "0")
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        # 篩選成交金額門檻
         df = df[df["turnover"] >= min_turnover]
-
-        # 依成交金額排序
         df = df.sort_values(by="turnover", ascending=False).head(limit).reset_index(drop=True)
+
         print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
+        print("[price_fetcher] 前幾筆熱門股：")
+        print(df[["stock_id", "stock_name", "turnover"]].head())
         return df
 
     except Exception as e:
