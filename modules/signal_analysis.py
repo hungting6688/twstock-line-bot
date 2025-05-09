@@ -1,4 +1,3 @@
-# ✅ signal_analysis.py（調整極弱條件 >= 1 並加入白話建議）
 import pandas as pd
 from modules.ta_analysis import calculate_technical_scores
 from modules.ta_generator import generate_technical_signals
@@ -9,7 +8,10 @@ from modules.strategy_profiles import get_strategy_profile
 from modules.market_sentiment import get_market_sentiment
 
 def is_large_cap(row):
-    return row.get("market_cap", 0) > 50_000_000_000 and row.get("avg_volume", 0) > 5000
+    return (
+        row.get("market_cap", 0) >= 100_000_000_000 or
+        row.get("turnover", 0) >= 1_000_000_000
+    )
 
 def analyze_stocks_with_signals(mode="opening"):
     print("[signal_analysis] ✅ 開始整合分析流程...")
@@ -51,7 +53,7 @@ def analyze_stocks_with_signals(mode="opening"):
         sentiment_multiplier = {
             1: 1.1,
             0: 1.0,
-           -1: 0.9
+            -1: 0.9
         }.get(sentiment["sentiment_score"], 1.0)
         print(f"[signal_analysis] 📈 市場氣氛：{sentiment['note']} ➜ 分數乘以 {sentiment_multiplier}")
 
@@ -82,7 +84,7 @@ def analyze_stocks_with_signals(mode="opening"):
         recommended["label"] = "👀 觀察股"
         print("[signal_analysis] ⚠️ 無推薦股票，顯示觀察股供參考")
 
-    # ✅ 極弱條件放寬為 >=1，並強制補充建議與理由
+    # 極弱股處理
     if "weak_signal" in scored_df.columns:
         weak_stocks = scored_df[scored_df["weak_signal"] >= 1] \
             .sort_values(by="weak_signal", ascending=False).head(2).copy()
