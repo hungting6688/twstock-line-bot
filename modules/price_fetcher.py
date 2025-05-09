@@ -1,9 +1,11 @@
+# modules/price_fetcher.py
+
 import pandas as pd
 import requests
 from io import StringIO
 from datetime import datetime
 
-def fetch_price_data(min_turnover=50000000, limit=450):
+def fetch_price_data(min_turnover=50000000, limit=100):
     print("[price_fetcher] ✅ 使用 TWSE CSV 報表穩定解析版本")
 
     today_str = datetime.today().strftime("%Y%m%d")
@@ -35,24 +37,26 @@ def fetch_price_data(min_turnover=50000000, limit=450):
         df.columns = df.columns.str.replace(r"\s", "", regex=True)
 
         turnover_col = next((col for col in df.columns if "成交金額" in col), None)
-        if not turnover_col:
-            raise ValueError("找不到成交金額欄位")
+        close_col = next((col for col in df.columns if "收盤價" in col), None)
+
+        if not turnover_col or not close_col:
+            raise ValueError("找不到成交金額或收盤價欄位")
 
         df = df.rename(columns={
             "證券代號": "stock_id",
             "證券名稱": "stock_name",
-            turnover_col: "turnover"
+            turnover_col: "turnover",
+            close_col: "close"
         })
 
-        df = df[["stock_id", "stock_name", "turnover"]].dropna()
-        df["turnover"] = df["turnover"].astype(str).str.replace(",", "", regex=False).astype(float) * 1000
+        df = df[["stock_id", "stock_name", "turnover", "close"]].dropna()
+        df["turnover"] = df["turnover"].astype(str).str.replace(",", "").astype(float) * 1000
+        df["close"] = df["close"].astype(str).str.replace(",", "").astype(float)
 
-        # 過濾成交金額與合法股票代號（4碼數字開頭，可含英文字母）
         df = df[df["turnover"] >= min_turnover]
         df = df[df["stock_id"].astype(str).str.match(r"^[0-9]{4}[A-Z]?$")]
 
         df = df.sort_values(by="turnover", ascending=False).head(limit).reset_index(drop=True)
-
         print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
         return df
 
