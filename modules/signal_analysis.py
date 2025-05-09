@@ -95,10 +95,9 @@ def analyze_stocks_with_signals(mode="opening"):
     else:
         combined = recommended
 
-    # ✅ 最終保險：確保 label 欄位為字串（避免 downstream crash）
-    if "label" in combined.columns:
-        combined["label"] = combined["label"].fillna("📌").astype(str)
-    else:
+    # ✅ 🔒 最終保險：確保 label 欄位存在 + 為字串（避免 KeyError(False)）
+    if "label" not in combined.columns:
         combined["label"] = "📌"
+    combined["label"] = combined["label"].fillna("📌").astype(str)
 
     return combined.drop(columns=["weak_signal"], errors="ignore")
