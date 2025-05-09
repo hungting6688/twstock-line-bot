@@ -1,3 +1,4 @@
+# ✅ signal_analysis.py（調整極弱條件 >= 1 並加入白話建議）
 import pandas as pd
 from modules.ta_analysis import calculate_technical_scores
 from modules.ta_generator import generate_technical_signals
@@ -59,11 +60,9 @@ def analyze_stocks_with_signals(mode="opening"):
     scored_df["score"] = scored_df["score"] * sentiment_multiplier
     scored_df["score"] = scored_df["score"].round(2)
 
-    # 標記大型股 / 小型股
     scored_df["cap_class"] = scored_df.apply(lambda row: "大型股" if is_large_cap(row) else "中小型股", axis=1)
     scored_df["reasons"] = scored_df["reasons"] + "、" + scored_df["cap_class"]
 
-    # 推薦股處理（至少 2 檔大型股）
     eligible = scored_df[scored_df["score"] >= min_score].sort_values(by="score", ascending=False)
     large_cap_df = eligible[eligible["cap_class"] == "大型股"]
     remaining_df = eligible[eligible["cap_class"] != "大型股"]
@@ -83,9 +82,9 @@ def analyze_stocks_with_signals(mode="opening"):
         recommended["label"] = "👀 觀察股"
         print("[signal_analysis] ⚠️ 無推薦股票，顯示觀察股供參考")
 
-    # 加入極弱股提醒（防止欄位不存在錯誤）
+    # ✅ 極弱條件放寬為 >=1，並強制補充建議與理由
     if "weak_signal" in scored_df.columns:
-        weak_stocks = scored_df[scored_df["weak_signal"] >= 2] \
+        weak_stocks = scored_df[scored_df["weak_signal"] >= 1] \
             .sort_values(by="weak_signal", ascending=False).head(2).copy()
     else:
         weak_stocks = pd.DataFrame()
@@ -93,12 +92,12 @@ def analyze_stocks_with_signals(mode="opening"):
     if not weak_stocks.empty:
         weak_stocks["label"] = "⚠️ 走弱股"
         weak_stocks["suggestion"] = "⚠️ 技術結構轉弱，建議暫停操作"
+        weak_stocks["reasons"] = weak_stocks["reasons"].astype(str) + "、弱勢訊號累積"
         print(f"[signal_analysis] 🚨 偵測到 {len(weak_stocks)} 檔走弱股")
         combined = pd.concat([recommended, weak_stocks], ignore_index=True)
     else:
         combined = recommended
 
-    # ✅ 🔒 最終保險：確保 label 欄位存在 + 為字串（避免 KeyError(False)）
     if "label" not in combined.columns:
         combined["label"] = "📌"
     combined["label"] = combined["label"].fillna("📌").astype(str)
