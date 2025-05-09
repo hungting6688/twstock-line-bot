@@ -1,57 +1,54 @@
-# modules/ta_generator.py
-
 import pandas as pd
 import numpy as np
 
-def generate_ta_signals(df):
+def generate_technical_signals(df):
     print("[ta_generator] ✅ 產生技術指標欄位")
 
-    df = df.copy()
-    df["macd_signal"] = False
-    df["kdj_signal"] = False
-    df["rsi_signal"] = False
-    df["ma_signal"] = False
-    df["bollinger_signal"] = False
-
     try:
-        close = df["close"]
+        # 檢查必要欄位
+        if not all(col in df.columns for col in ["close"]):
+            raise ValueError("缺少必要欄位：close")
 
-        # 計算 MACD
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        macd = ema12 - ema26
+        # MACD 指標
+        exp12 = df["close"].ewm(span=12, adjust=False).mean()
+        exp26 = df["close"].ewm(span=26, adjust=False).mean()
+        macd = exp12 - exp26
         signal = macd.ewm(span=9, adjust=False).mean()
-        df["macd_signal"] = macd > signal
+        df["macd_signal"] = (macd > signal)
 
-        # 計算 KD
-        low_min = close.rolling(window=9, min_periods=1).min()
-        high_max = close.rolling(window=9, min_periods=1).max()
-        rsv = (close - low_min) / (high_max - low_min + 1e-9) * 100
+        # KD 指標
+        low_min = df["close"].rolling(window=9).min()
+        high_max = df["close"].rolling(window=9).max()
+        rsv = (df["close"] - low_min) / (high_max - low_min) * 100
         k = rsv.ewm(com=2).mean()
         d = k.ewm(com=2).mean()
-        df["kdj_signal"] = k > d
+        df["kdj_signal"] = (k > d) & (k < 40)
 
-        # RSI
-        delta = close.diff()
-        gain = delta.where(delta > 0, 0.0)
-        loss = -delta.where(delta < 0, 0.0)
-        avg_gain = gain.rolling(window=14).mean()
-        avg_loss = loss.rolling(window=14).mean()
-        rs = avg_gain / (avg_loss + 1e-9)
+        # RSI 指標
+        delta = df["close"].diff()
+        gain = np.where(delta > 0, delta, 0.0)
+        loss = np.where(delta < 0, -delta, 0.0)
+        avg_gain = pd.Series(gain).rolling(window=14).mean()
+        avg_loss = pd.Series(loss).rolling(window=14).mean()
+        rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
         df["rsi_signal"] = rsi > 50
 
-        # 均線
-        ma5 = close.rolling(window=5).mean()
-        ma20 = close.rolling(window=20).mean()
-        ma60 = close.rolling(window=60).mean()
-        df["ma_signal"] = (close > ma5) & (close > ma20) & (close > ma60)
+        # 均線（MA）
+        ma5 = df["close"].rolling(window=5).mean()
+        ma20 = df["close"].rolling(window=20).mean()
+        ma60 = df["close"].rolling(window=60).mean()
+        df["ma_signal"] = (df["close"] > ma5) & (df["close"] > ma20) & (df["close"] > ma60)
 
         # 布林通道
-        mid = close.rolling(window=20).mean()
-        df["bollinger_signal"] = close > mid
+        ma20_bb = df["close"].rolling(window=20).mean()
+        std_bb = df["close"].rolling(window=20).std()
+        upper = ma20_bb + 2 * std_bb
+        lower = ma20_bb - 2 * std_bb
+        df["bollinger_signal"] = df["close"] > ma20_bb
+
+        return df
 
     except Exception as e:
         print(f"[ta_generator] ⚠️ 技術指標處理失敗: {e}")
-
-    return df
+        raise
