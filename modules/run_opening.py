@@ -1,13 +1,15 @@
 # modules/run_opening.py
 
 from modules.signal_analysis import analyze_stocks_with_signals
+from modules.strategy_profiles import get_strategy_profile
 from modules.line_bot import send_line_message
 
 def analyze_opening():
     print("[run_opening] 開始執行開盤推薦分析...")
 
     try:
-        df_result = analyze_stocks_with_signals(mode="opening")
+        strategy = get_strategy_profile("opening")
+        df_result = analyze_stocks_with_signals(**strategy)
 
         if df_result is None or df_result.empty:
             message = "📉 今日無符合條件的推薦股，請持續觀察市場動態。"
@@ -17,7 +19,7 @@ def analyze_opening():
 
         lines = ["📈 今日開盤推薦結果：\n"]
         for _, row in df_result.iterrows():
-            label = "✅ 推薦股" if row["score"] >= 5 else "👀 觀察股"
+            label = "✅ 推薦股" if row["score"] >= strategy["min_score"] else "👀 觀察股"
             lines.append(
                 f"{label}｜{row['stock_id']} {row['stock_name']}｜分數：{row['score']} 分\n"
                 f"➡️ 原因：{row['reasons']}\n"
