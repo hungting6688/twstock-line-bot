@@ -7,26 +7,26 @@ def fetch_fundamental_data():
     print("[fundamental_scraper] 擷取法人買賣超資料...")
 
     try:
-        # 使用昨日日期
+        # 取昨日日期（證交所每日法人統計）
         date = (datetime.today() - timedelta(days=1)).strftime("%Y%m%d")
         url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={date}&type=ALLBUT0999"
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get(url, headers=headers, timeout=10)
         content = res.text
 
-        # 處理 CSV 格式（移除無效行）
+        # 清理原始 CSV
         lines = content.splitlines()
-        cleaned_lines = [line for line in lines if not line.startswith('=')]
+        cleaned_lines = [line for line in lines if not line.startswith('=') and ',' in line]
         csv_data = "\n".join(cleaned_lines)
 
-        # 讀取為 DataFrame（中文欄位）
-        df = pd.read_csv(io.StringIO(csv_data))
+        # 使用 pandas 讀入並跳過錯誤行
+        df = pd.read_csv(io.StringIO(csv_data), on_bad_lines="skip")
 
-        # 過濾出需要的欄位（股票代號與法人買超欄位）
+        # 過濾代號為數字的股票
         df = df[df["證券代號"].apply(lambda x: str(x).isdigit())]
         df["stock_id"] = df["證券代號"].astype(str)
 
-        # 整理三大法人買賣超欄位，加總為 buy_total
+        # 整理法人三方買賣合計
         df["buy_total"] = (
             df["外陸資買進股數(不含外資自營商)"].replace(",", "", regex=True).astype(float) -
             df["外陸資賣出股數(不含外資自營商)"].replace(",", "", regex=True).astype(float) +
