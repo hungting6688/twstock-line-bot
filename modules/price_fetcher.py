@@ -50,6 +50,9 @@ def fetch_price_data(min_turnover=50000000, limit=100):
         })
 
         df = df[["stock_id", "stock_name", "turnover", "close"]].dropna()
+        df = df[~df["turnover"].astype(str).str.contains("--")]
+        df = df[~df["close"].astype(str).str.contains("--")]
+
         df["turnover"] = df["turnover"].astype(str).str.replace(",", "").astype(float) * 1000
         df["close"] = df["close"].astype(str).str.replace(",", "").astype(float)
 
