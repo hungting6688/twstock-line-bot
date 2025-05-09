@@ -1,4 +1,4 @@
-# ✅ price_fetcher.py（再強化 debug 與調降門檻）
+# ✅ price_fetcher.py（修正成交金額轉換為 NaN 的問題）
 import pandas as pd
 import requests
 from io import StringIO
@@ -29,9 +29,14 @@ def fetch_price_data(min_turnover=1_000_000, limit=100, mode="opening", strategy
 
         df = df[df["stock_id"].astype(str).str.isnumeric()]
 
-        for col in ["close", "volume", "turnover"]:
-            df[col] = df[col].astype(str).str.replace(",", "", regex=False).replace("--", "0")
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+        # 修正轉換失敗問題
+        df["turnover"] = df["turnover"].astype(str)
+        df["turnover"] = df["turnover"].str.replace(",", "", regex=False)
+        df["turnover"] = df["turnover"].str.replace("--", "0", regex=False)
+        df["turnover"] = pd.to_numeric(df["turnover"], errors="coerce")
+
+        df["close"] = pd.to_numeric(df["close"].astype(str).str.replace(",", "").str.replace("--", "0"), errors="coerce")
+        df["volume"] = pd.to_numeric(df["volume"].astype(str).str.replace(",", "").str.replace("--", "0"), errors="coerce")
 
         print("[debug] 成交金額最大值：", df["turnover"].max())
         print("[debug] 未篩選前前幾筆 turnover：")
