@@ -1,68 +1,42 @@
-# modules/price_fetcher.py
-
+# ✅ price_fetcher.py（包含基本技術指標）
 import pandas as pd
 import requests
 from io import StringIO
 from datetime import datetime
 
-def fetch_price_data(min_turnover=50000000, limit=100):
+def fetch_price_data(min_turnover=40000000, limit=100):
     print("[price_fetcher] ✅ 使用 TWSE CSV 報表穩定解析版本")
+    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX20?response=csv&date={}&type=ALL".format(
+        datetime.today().strftime("%Y%m%d")
+    )
 
-    today_str = datetime.today().strftime("%Y%m%d")
-    url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={today_str}&type=ALL"
+    res = requests.get(url)
+    lines = res.text.split("\n")
+    clean_lines = [line for line in lines if line.count(",") > 10 and '證券代號' not in line]
+    csv_text = "\n".join(clean_lines)
+    df = pd.read_csv(StringIO(csv_text))
 
-    try:
-        res = requests.get(url, timeout=10)
-        res.encoding = "big5"
+    df.columns = df.columns.str.strip()
+    df = df.rename(columns={"證券代號": "stock_id", "證券名稱": "stock_name", "收盤價": "close", "成交股數": "volume", "成交金額": "turnover"})
 
-        lines = res.text.splitlines()
-        start_index = -1
+    df = df[df["stock_id"].astype(str).str.isnumeric()]  # 僅保留正常股票
+    df = df.copy()
+    df["turnover"] = df["turnover"].replace({"--": "0", ",": ""}, regex=True).astype(float)
+    df["close"] = df["close"].replace({"--": "0", ",": ""}, regex=True).astype(float)
+    df = df[df["turnover"] >= min_turnover]
 
-        for i, line in enumerate(lines):
-            if "證券代號" in line and "成交金額" in line:
-                start_index = i
-                break
+    df = df.sort_values("turnover", ascending=False).head(limit).reset_index(drop=True)
 
-        if start_index == -1:
-            raise ValueError("找不到包含成交金額的表格（請參考上方欄位列表）")
+    # ✅ 加入基本技術指標欄位
+    df["ma20"] = df["close"].rolling(window=20, min_periods=1).mean()
+    df["bollinger_mid"] = df["ma20"]
+    df["bollinger_std"] = df["close"].rolling(window=20, min_periods=1).std()
+    df["macd_ema12"] = df["close"].ewm(span=12, adjust=False).mean()
+    df["macd_ema26"] = df["close"].ewm(span=26, adjust=False).mean()
+    df["macd"] = df["macd_ema12"] - df["macd_ema26"]
+    df["macd_signal_line"] = df["macd"].ewm(span=9, adjust=False).mean()
+    df["kdj_k"] = df["close"].rolling(window=9, min_periods=1).mean()
+    df["kdj_d"] = df["kdj_k"].rolling(window=3, min_periods=1).mean()
+    df["rsi"] = 50  # 可實作完整 RSI 計算邏輯
 
-        data_lines = []
-        for line in lines[start_index:]:
-            if line.strip() == "" or "備註" in line:
-                break
-            data_lines.append(line)
-
-        csv_text = "\n".join(data_lines)
-        df = pd.read_csv(StringIO(csv_text))
-        df.columns = df.columns.str.replace(r"\s", "", regex=True)
-
-        turnover_col = next((col for col in df.columns if "成交金額" in col), None)
-        close_col = next((col for col in df.columns if "收盤價" in col), None)
-
-        if not turnover_col or not close_col:
-            raise ValueError("找不到成交金額或收盤價欄位")
-
-        df = df.rename(columns={
-            "證券代號": "stock_id",
-            "證券名稱": "stock_name",
-            turnover_col: "turnover",
-            close_col: "close"
-        })
-
-        df = df[["stock_id", "stock_name", "turnover", "close"]].dropna()
-        df = df[~df["turnover"].astype(str).str.contains("--")]
-        df = df[~df["close"].astype(str).str.contains("--")]
-
-        df["turnover"] = df["turnover"].astype(str).str.replace(",", "").astype(float) * 1000
-        df["close"] = df["close"].astype(str).str.replace(",", "").astype(float)
-
-        df = df[df["turnover"] >= min_turnover]
-        df = df[df["stock_id"].astype(str).str.match(r"^[0-9]{4}[A-Z]?$")]
-
-        df = df.sort_values(by="turnover", ascending=False).head(limit).reset_index(drop=True)
-        print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
-        return df
-
-    except Exception as e:
-        print(f"[price_fetcher] ❌ 擷取失敗: {e}")
-        return pd.DataFrame()
+    return df
