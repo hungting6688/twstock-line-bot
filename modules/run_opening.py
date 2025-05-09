@@ -1,4 +1,4 @@
-# ✅ 終極穩定版 run_opening.py（完全防止 KeyError(False)）
+# ✅ run_opening.py（加上除錯用 label 印出 + 完整錯誤捕捉）
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 from modules.strategy_profiles import get_strategy_profile
@@ -24,21 +24,24 @@ def analyze_opening():
 
         lines = ["📈 今日開盤推薦結果：", sentiment_note]
 
-        for _, row in df_result.iterrows():
-            # 強制轉為字串，避免布林值錯誤
-            label = str(row.get("label") or "📌")
-            stock_id = str(row.get("stock_id") or "")
-            stock_name = str(row.get("stock_name") or "")
-            score = str(row.get("score") or "-")
-            reasons = str(row.get("reasons") or "-")
-            suggestion = str(row.get("suggestion") or "-")
+        for idx, row in df_result.iterrows():
+            try:
+                label = str(row.get("label") or "📌")
+                stock_id = str(row.get("stock_id") or "")
+                stock_name = str(row.get("stock_name") or "")
+                score = str(row.get("score") or "-")
+                reasons = str(row.get("reasons") or "-")
+                suggestion = str(row.get("suggestion") or "-")
 
-            # ⚠️ 不可用 row[label] 這類錯誤行為！label 只是顯示用
-            lines.append(
-                f"{label}｜{stock_id} {stock_name}｜分數：{score} 分\n"
-                f"➡️ 原因：{reasons}\n"
-                f"💡 建議：{suggestion}\n"
-            )
+                print(f"[debug] row[{idx}] label={label} stock_id={stock_id}")
+
+                lines.append(
+                    f"{label}｜{stock_id} {stock_name}｜分數：{score} 分\n"
+                    f"➡️ 原因：{reasons}\n"
+                    f"💡 建議：{suggestion}\n"
+                )
+            except Exception as row_err:
+                print(f"[run_opening] ⚠️ 單列錯誤：{repr(row_err)} at row {idx}")
 
         message = "\n".join(lines)
         send_line_message(message)
