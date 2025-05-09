@@ -19,14 +19,25 @@ def fetch_market_sentiment():
             print("[market_sentiment] ⚠️ 資料不足")
             return "中性"
 
-        # 比較前一筆與最後一筆的指數
-        first = float(rows[0][1].replace(",", ""))
-        last = float(rows[-1][1].replace(",", ""))
-        change = last - first
+        # 過濾非法數值（如 "--"）
+        def safe_float(value):
+            try:
+                return float(value.replace(",", ""))
+            except:
+                return None
 
-        if change > 50:
+        first = safe_float(rows[0][1])
+        last = safe_float(rows[-1][1])
+
+        if first is None or last is None or first == 0:
+            print("[market_sentiment] ⚠️ 數值轉換失敗")
+            return "中性"
+
+        percent_change = (last - first) / first * 100
+
+        if percent_change > 0.5:
             return "正向"
-        elif change < -50:
+        elif percent_change < -0.5:
             return "負向"
         else:
             return "中性"
