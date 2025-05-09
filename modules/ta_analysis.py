@@ -1,50 +1,49 @@
-# modules/ta_analysis.py
-
 import pandas as pd
-from modules.strategy_profiles import get_strategy_profile
 
-def calculate_technical_scores(df, mode="opening"):
+def calculate_technical_scores(df, **weights):
     print("[ta_analysis] ✅ 開始評分")
     result = []
-    profile = get_strategy_profile(mode)
 
     for _, row in df.iterrows():
         score = 0.0
         reasons = []
         suggestion = ""
 
+        # 技術指標評分邏輯
         if row.get("macd_signal", False):
-            score += profile["macd"]
+            score += weights.get("macd", 0)
             reasons.append("MACD黃金交叉")
 
         if row.get("kdj_signal", False):
-            score += profile["kdj"]
+            score += weights.get("kdj", 0)
             reasons.append("KD黃金交叉")
 
         if row.get("rsi_signal", False):
-            score += profile["rsi"]
+            score += weights.get("rsi", 0)
             reasons.append("RSI走強")
 
         if row.get("ma_signal", False):
-            score += profile["ma"]
+            score += weights.get("ma", 0)
             reasons.append("站上均線")
 
         if row.get("bollinger_signal", False):
-            score += profile["bollinger"]
+            score += weights.get("bollinger", 0)
             reasons.append("布林通道偏多")
 
+        # 基本面條件
         if row.get("buy_total", 0) > 0:
-            score += profile["buy_total"]
+            score += weights.get("buy_total", 0)
             reasons.append("法人買超")
 
         if row.get("eps_growth", False):
-            score += profile["eps_growth"]
+            score += weights.get("eps_growth", 0)
             reasons.append("EPS成長")
 
         if row.get("dividend_yield", 0) >= 3 and row.get("ytd_return", 0) > 0:
-            score += profile["dividend_yield"]
+            score += weights.get("dividend_yield", 0)
             reasons.append("高殖利率")
 
+        # 白話建議
         if score >= 7:
             suggestion = "建議立即列入關注清單"
         elif score >= 5:
