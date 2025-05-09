@@ -1,35 +1,38 @@
+# ✅ 調整後的 strategy_profiles.py（放寬推薦門檻 + 提升技術權重）
 def get_strategy_profile(mode="opening"):
     """
     根據不同分析時段，回傳各技術/基本面指標的評分權重與掃描數量。
     """
 
     base_profile = {
-        # 技術指標評分權重（調整為較具辨識力的總分）
-        "macd": 1.5,
+        # 技術指標評分權重（總分 ≈ 7.5）
+        "macd": 1.0,
         "kdj": 1.0,
         "rsi": 1.0,
-        "ma": 1.0,
-        "bollinger": 1.0,
+        "ma": 1.5,         # ✅ 提升均線權重
+        "bollinger": 1.0,   # ✅ 提升布林通道權重
 
-        # 基本面與法人加分（合計約 3.0）
+        # 基本面與法人加分
         "buy_total": 1.0,
         "eps_growth": 1.0,
         "dividend_yield": 1.0,
 
-        # 額外條件邏輯
-        "dividend_weight_conditional": True,  # 殖利率需搭配 EPS 或法人才加分
-        "suppress_low_volume": True,          # 冷門股降分（低成交量、小市值）
-        "promote_large_cap": True,            # 大型股加分（成交量高+市值高）
-        "apply_sentiment_adjustment": True,   # 套用市場氣氛修正
-        "limit_score": 7.0,                   # 總分上限控制
-        "include_weak": True,                 # 顯示走弱股提示
-        "fallback_top_n": 7                   # 無推薦時 fallback 觀察股數量
+        # 額外參數
+        "include_weak": True,
+        "fallback_top_n": 7,
+
+        # 新增參數區
+        "dividend_weight_conditional": True,
+        "suppress_low_volume": True,
+        "promote_large_cap": True,
+        "apply_sentiment_adjustment": True,
+        "limit_score": 8.0
     }
 
     if mode == "opening":
         base_profile.update({
-            "min_score": 4.0,           # ✅ 技術為主容忍度較高
-            "recommend_min": 6.0,
+            "min_score": 4.0,         # ✅ 降低推薦門檻
+            "recommend_min": 5.0,     # ✅ 放寬觀察轉推薦的分數
             "recommend_max": 8,
             "price_limit": 100,
             "eps_limit": 100
@@ -37,7 +40,7 @@ def get_strategy_profile(mode="opening"):
 
     elif mode == "intraday":
         base_profile.update({
-            "min_score": 5.0,           # ✅ 聚焦中小型短期機會
+            "min_score": 5.5,
             "recommend_min": 6.0,
             "recommend_max": 8,
             "price_limit": 150,
@@ -46,7 +49,7 @@ def get_strategy_profile(mode="opening"):
 
     elif mode == "dividend":
         base_profile.update({
-            "min_score": 5.0,           # ✅ 著重殖利率與籌碼條件
+            "min_score": 5.5,
             "recommend_min": 6.0,
             "recommend_max": 8,
             "price_limit": 200,
@@ -55,7 +58,7 @@ def get_strategy_profile(mode="opening"):
 
     elif mode == "closing":
         base_profile.update({
-            "min_score": 5.5,           # ✅ 收盤偏重中長期強勢股
+            "min_score": 6.0,
             "recommend_min": 6.5,
             "recommend_max": 8,
             "price_limit": 500,
