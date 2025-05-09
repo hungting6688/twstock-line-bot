@@ -7,7 +7,8 @@ def analyze_opening():
 
     try:
         strategy = get_strategy_profile("opening")
-        min_score = strategy["min_score"]
+        recommend_min = strategy.get("recommend_min", 6.0)  # ✅ 推薦門檻
+
         df_result = analyze_stocks_with_signals(mode="opening")
 
         if df_result is None or df_result.empty:
@@ -18,7 +19,7 @@ def analyze_opening():
 
         lines = ["📈 今日開盤推薦結果：\n"]
         for _, row in df_result.iterrows():
-            label = "✅ 推薦股" if row["score"] >= min_score else "👀 觀察股"
+            label = "✅ 推薦股" if row["score"] >= recommend_min else "👀 觀察股"
             lines.append(
                 f"{label}｜{row['stock_id']} {row['stock_name']}｜分數：{row['score']} 分\n"
                 f"➡️ 原因：{row['reasons']}\n"
