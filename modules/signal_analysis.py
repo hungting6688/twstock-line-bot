@@ -12,11 +12,11 @@ def analyze_stocks_with_signals(mode="opening"):
     # 載入對應時段的策略參數
     strategy = get_strategy_profile(mode)
     min_turnover = 40_000_000
-    min_score = strategy["min_score"]
-    price_limit = strategy["price_limit"]
-    eps_limit = strategy["eps_limit"]
-    recommend_min = strategy["recommend_min"]
-    recommend_max = strategy["recommend_max"]
+    min_score = strategy.get("min_score", 5)
+    price_limit = strategy.get("price_limit", 100)
+    eps_limit = strategy.get("eps_limit", 100)
+    recommend_min = strategy.get("recommend_min", 5)
+    recommend_max = strategy.get("recommend_max", 8)
 
     # Step 1：擷取熱門股資料
     print("[signal_analysis] ⏳ 擷取熱門股清單...")
@@ -55,8 +55,7 @@ def analyze_stocks_with_signals(mode="opening"):
 
     if not recommended.empty:
         print(f"[signal_analysis] ✅ 推薦股票完成，共 {len(recommended)} 檔")
-        top_n = recommended.head(recommend_max)
-        return top_n
+        return recommended.head(recommend_max)
 
     # 若無符合推薦門檻，回傳 fallback 觀察股
     fallback = final_df.sort_values(by="score", ascending=False).head(recommend_min).reset_index(drop=True)
