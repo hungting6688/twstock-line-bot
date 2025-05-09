@@ -1,3 +1,4 @@
+# ✅ 修正版 run_opening.py（避免 False 錯誤 + 推播穩定）
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 from modules.strategy_profiles import get_strategy_profile
@@ -18,18 +19,23 @@ def analyze_opening():
             print("[run_opening] 推播訊息組裝完成 ✅")
             return message
 
-        # 市場氣氛文字說明（可選）
         sentiment_info = get_market_sentiment() if strategy.get("apply_sentiment_adjustment", False) else None
         sentiment_note = f"📊 市場氣氛：{sentiment_info['note']}\n" if sentiment_info else ""
 
         lines = ["📈 今日開盤推薦結果：", sentiment_note]
 
         for _, row in df_result.iterrows():
-            label = row.get("label", "📌")
+            label = str(row.get("label", "📌"))
+            stock_id = str(row.get("stock_id", "-"))
+            name = str(row.get("stock_name", ""))
+            score = str(row.get("score", "-"))
+            reasons = str(row.get("reasons", "-"))
+            suggestion = str(row.get("suggestion", "-"))
+
             lines.append(
-                f"{label}｜{row['stock_id']} {row.get('stock_name', '')}｜分數：{row['score']} 分\n"
-                f"➡️ 原因：{row.get('reasons', '-')}\n"
-                f"💡 建議：{row.get('suggestion', '-')}\n"
+                f"{label}｜{stock_id} {name}｜分數：{score} 分\n"
+                f"➡️ 原因：{reasons}\n"
+                f"💡 建議：{suggestion}\n"
             )
 
         message = "\n".join(lines)
@@ -38,7 +44,9 @@ def analyze_opening():
         return message
 
     except Exception as e:
-        print(f"[run_opening] ❌ 錯誤發生：{e}")
-        error_msg = f"❗ 開盤分析失敗：{str(e)}"
+        import traceback
+        print(f"[run_opening] ❌ 錯誤發生：{repr(e)}")
+        traceback.print_exc()
+        error_msg = "❗ 開盤分析失敗，請檢查輸出欄位內容。"
         send_line_message(error_msg)
         return error_msg
