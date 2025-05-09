@@ -1,4 +1,4 @@
-# ✅ strategy_profiles.py（新增技術參數）
+# ✅ strategy_profiles.py（新增 weak_threshold）
 def get_strategy_profile(mode="opening"):
     """
     根據不同分析時段，回傳各技術/基本面指標的評分權重與掃描數量。
@@ -23,7 +23,8 @@ def get_strategy_profile(mode="opening"):
         "suppress_low_volume": True,
         "promote_large_cap": True,
         "apply_sentiment_adjustment": True,
-        "limit_score": 7.0
+        "limit_score": 7.0,
+        "weak_threshold": 2  # 判定走弱的技術指標數
     }
 
     if mode == "opening":
@@ -33,7 +34,6 @@ def get_strategy_profile(mode="opening"):
             "recommend_max": 8,
             "price_limit": 100,
             "eps_limit": 100,
-            # 技術參數
             "rsi_period": 9,
             "ma_periods": [5, 10],
             "macd_fast": 12,
