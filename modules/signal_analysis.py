@@ -63,9 +63,8 @@ def analyze_stocks_with_signals(mode="opening"):
     scored_df["cap_class"] = scored_df.apply(lambda row: "大型股" if is_large_cap(row) else "中小型股", axis=1)
     scored_df["reasons"] = scored_df["reasons"] + "、" + scored_df["cap_class"]
 
-    # 篩出高分股票
+    # 推薦股處理（至少 2 檔大型股）
     eligible = scored_df[scored_df["score"] >= min_score].sort_values(by="score", ascending=False)
-
     large_cap_df = eligible[eligible["cap_class"] == "大型股"]
     remaining_df = eligible[eligible["cap_class"] != "大型股"]
 
@@ -79,10 +78,20 @@ def analyze_stocks_with_signals(mode="opening"):
 
     if not recommended.empty:
         recommended["label"] = "✅ 推薦股"
-        print(f"[signal_analysis] ✅ 推薦股票完成，共 {len(recommended)} 檔")
-        return recommended
+    else:
+        recommended = scored_df.sort_values(by="score", ascending=False).head(recommend_min).reset_index(drop=True)
+        recommended["label"] = "👀 觀察股"
+        print("[signal_analysis] ⚠️ 無推薦股票，顯示觀察股供參考")
 
-    fallback = scored_df.sort_values(by="score", ascending=False).head(recommend_min).reset_index(drop=True)
-    fallback["label"] = "👀 觀察股"
-    print("[signal_analysis] ⚠️ 無推薦股票，顯示觀察股供參考")
-    return fallback
+    # 加入極弱股提醒
+    weak_stocks = scored_df[scored_df["weak_signal"] >= 2] \
+        .sort_values(by="weak_signal", ascending=False).head(2).copy()
+
+    if not weak_stocks.empty:
+        weak_stocks["label"] = "⚠️ 走弱股"
+        weak_stocks["suggestion"] = "⚠️ 技術結構轉弱，建議暫停操作"
+        print(f"[signal_analysis] 🚨 偵測到 {len(weak_stocks)} 檔走弱股")
+
+        return pd.concat([recommended, weak_stocks], ignore_index=True)
+
+    return recommended
