@@ -24,6 +24,7 @@ def get_strategy_profile(mode="opening"):
         base_profile.update({
             "min_score": 5.0,
             "recommend_min": 6.0,
+            "recommend_max": 8,
             "price_limit": 100,
             "eps_limit": 100
         })
@@ -32,6 +33,7 @@ def get_strategy_profile(mode="opening"):
         base_profile.update({
             "min_score": 5.5,
             "recommend_min": 6.0,
+            "recommend_max": 8,
             "price_limit": 150,
             "eps_limit": 150
         })
@@ -40,6 +42,7 @@ def get_strategy_profile(mode="opening"):
         base_profile.update({
             "min_score": 5.5,
             "recommend_min": 6.0,
+            "recommend_max": 8,
             "price_limit": 200,
             "eps_limit": 200
         })
@@ -48,6 +51,7 @@ def get_strategy_profile(mode="opening"):
         base_profile.update({
             "min_score": 6.0,
             "recommend_min": 6.5,
+            "recommend_max": 8,
             "price_limit": 500,
             "eps_limit": 300
         })
