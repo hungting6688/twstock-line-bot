@@ -1,10 +1,10 @@
-# ✅ price_fetcher.py（調降門檻 + 加入 debug 顯示熱門股）
+# ✅ price_fetcher.py（再強化 debug 與調降門檻）
 import pandas as pd
 import requests
 from io import StringIO
 from datetime import datetime
 
-def fetch_price_data(min_turnover=10_000_000, limit=100, mode="opening", strategy=None):
+def fetch_price_data(min_turnover=1_000_000, limit=100, mode="opening", strategy=None):
     print("[price_fetcher] ✅ 使用 TWSE CSV 報表穩定解析版本")
     today = datetime.today().strftime("%Y%m%d")
     url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={today}&type=ALLBUT0999"
@@ -12,7 +12,7 @@ def fetch_price_data(min_turnover=10_000_000, limit=100, mode="opening", strateg
     try:
         res = requests.get(url, timeout=10)
         raw_text = res.text
-        lines = [line for line in raw_text.splitlines() if line.count(",") > 5 and '證券代號' in line or line[0:1].isdigit()]
+        lines = [line for line in raw_text.splitlines() if line.count(",") > 5 and ('證券代號' in line or line[0:1].isdigit())]
         cleaned_csv = "\n".join(lines)
         df = pd.read_csv(StringIO(cleaned_csv))
 
@@ -32,6 +32,10 @@ def fetch_price_data(min_turnover=10_000_000, limit=100, mode="opening", strateg
         for col in ["close", "volume", "turnover"]:
             df[col] = df[col].astype(str).str.replace(",", "", regex=False).replace("--", "0")
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        print("[debug] 成交金額最大值：", df["turnover"].max())
+        print("[debug] 未篩選前前幾筆 turnover：")
+        print(df[["stock_id", "stock_name", "turnover"]].head(10))
 
         df = df[df["turnover"] >= min_turnover]
         df = df.sort_values(by="turnover", ascending=False).head(limit).reset_index(drop=True)
