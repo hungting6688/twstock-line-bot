@@ -18,6 +18,7 @@ def analyze_opening():
             print("[run_opening] 推播訊息組裝完成 ✅")
             return message
 
+        # 市場氣氛文字說明（可選）
         sentiment_info = get_market_sentiment() if strategy.get("apply_sentiment_adjustment", False) else None
         sentiment_note = f"📊 市場氣氛：{sentiment_info['note']}\n" if sentiment_info else ""
 
