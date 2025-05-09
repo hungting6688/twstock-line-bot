@@ -1,3 +1,4 @@
+# ✅ 修正版 signal_analysis.py
 import pandas as pd
 from modules.ta_analysis import calculate_technical_scores
 from modules.ta_generator import generate_technical_signals
@@ -84,7 +85,7 @@ def analyze_stocks_with_signals(mode="opening"):
         print("[signal_analysis] ⚠️ 無推薦股票，顯示觀察股供參考")
 
     # 加入極弱股提醒
-    weak_stocks = scored_df[scored_df["weak_signal"] >= 2] \
+    weak_stocks = scored_df[scored_df.get("weak_signal", 0) >= 2] \
         .sort_values(by="weak_signal", ascending=False).head(2).copy()
 
     if not weak_stocks.empty:
@@ -95,5 +96,4 @@ def analyze_stocks_with_signals(mode="opening"):
     else:
         combined = recommended
 
-    # 🔥 安全回傳，刪除內部欄位
     return combined.drop(columns=["weak_signal"], errors="ignore")
