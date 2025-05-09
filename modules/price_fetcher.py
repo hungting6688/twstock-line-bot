@@ -1,4 +1,4 @@
-# ✅ price_fetcher.py（修正成交金額轉換為 NaN 的問題）
+# ✅ price_fetcher.py（回復接近原本成功版本的轉換邏輯）
 import pandas as pd
 import requests
 from io import StringIO
@@ -12,7 +12,9 @@ def fetch_price_data(min_turnover=1_000_000, limit=100, mode="opening", strategy
     try:
         res = requests.get(url, timeout=10)
         raw_text = res.text
-        lines = [line for line in raw_text.splitlines() if line.count(",") > 5 and ('證券代號' in line or line[0:1].isdigit())]
+
+        # 篩選有意義的資料行
+        lines = [line for line in raw_text.splitlines() if line.count(",") > 5 and ('證券代號' in line or line[:1].isdigit())]
         cleaned_csv = "\n".join(lines)
         df = pd.read_csv(StringIO(cleaned_csv))
 
@@ -23,24 +25,16 @@ def fetch_price_data(min_turnover=1_000_000, limit=100, mode="opening", strategy
             "證券代號": "stock_id",
             "證券名稱": "stock_name",
             "收盤價": "close",
-            "成交股數": "volume",
-            "成交金額": "turnover"
+            "成交金額": "turnover",
+            "成交股數": "volume"
         })
 
         df = df[df["stock_id"].astype(str).str.isnumeric()]
 
-        # 修正轉換失敗問題
-        df["turnover"] = df["turnover"].astype(str)
-        df["turnover"] = df["turnover"].str.replace(",", "", regex=False)
-        df["turnover"] = df["turnover"].str.replace("--", "0", regex=False)
-        df["turnover"] = pd.to_numeric(df["turnover"], errors="coerce")
-
-        df["close"] = pd.to_numeric(df["close"].astype(str).str.replace(",", "").str.replace("--", "0"), errors="coerce")
-        df["volume"] = pd.to_numeric(df["volume"].astype(str).str.replace(",", "").str.replace("--", "0"), errors="coerce")
-
-        print("[debug] 成交金額最大值：", df["turnover"].max())
-        print("[debug] 未篩選前前幾筆 turnover：")
-        print(df[["stock_id", "stock_name", "turnover"]].head(10))
+        # 回復早期成功版本的轉換邏輯
+        df["turnover"] = pd.to_numeric(df["turnover"].astype(str).str.replace(",", "", regex=False), errors="coerce")
+        df["close"] = pd.to_numeric(df["close"].astype(str).str.replace(",", "", regex=False), errors="coerce")
+        df["volume"] = pd.to_numeric(df["volume"].astype(str).str.replace(",", "", regex=False), errors="coerce")
 
         df = df[df["turnover"] >= min_turnover]
         df = df.sort_values(by="turnover", ascending=False).head(limit).reset_index(drop=True)
