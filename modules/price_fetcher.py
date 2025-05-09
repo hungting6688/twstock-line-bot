@@ -1,44 +1,51 @@
-import pandas as pd
 import requests
+import pandas as pd
 from io import StringIO
 from datetime import datetime
 
-def fetch_price_data(min_turnover=50000000, limit=100, mode="opening", strategy=None):
+def fetch_price_data(min_turnover=50_000_000, limit=100, mode="opening", strategy=None):
     print("[price_fetcher] ✅ 使用 TWSE CSV 報表穩定解析版本")
 
+    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={}&type=ALLBUT0999"
     today = datetime.today().strftime("%Y%m%d")
-    url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={today}&type=ALLBUT0999"
+    full_url = url.format(today)
+
     headers = {"User-Agent": "Mozilla/5.0"}
+    res = requests.get(full_url, headers=headers)
+    content = res.text
 
-    res = requests.get(url, headers=headers, timeout=10)
-    csv_content = res.text
+    # 清理 CSV 內容
+    lines = content.splitlines()
+    cleaned_lines = [line for line in lines if ',' in line and not line.startswith('=')]
+    cleaned_csv = "\n".join(cleaned_lines)
 
-    # 篩除無效行
-    lines = [line for line in csv_content.splitlines() if ',' in line and '"' not in line]
-    cleaned_csv = "\n".join(lines)
+    if not cleaned_csv.strip() or "證券代號" not in cleaned_csv:
+        print("[price_fetcher] ⚠️ 檔案無效或無資料，跳過讀取")
+        return pd.DataFrame(columns=["stock_id", "stock_name", "turnover"])
+
     df = pd.read_csv(StringIO(cleaned_csv))
 
-    print(f"[price_fetcher] 欄位名稱： {list(df.columns)}")
+    print("[price_fetcher] 欄位名稱：", list(df.columns))
 
-    # 修正欄位名稱
-    df.rename(columns={"資訊代號": "stock_id", "資訊名稱": "stock_name"}, inplace=True)
-    df = df.rename(columns={df.columns[0]: "stock_id", df.columns[1]: "stock_name"})
-
-    # 轉換成交易金額
-    print("[debug] 成交金額前五筆原始值：")
-    print(df["成交金額"].head(5).tolist())
-
-    df["turnover"] = pd.to_numeric(df["成交金額"].astype(str).str.replace(",", "", regex=False), errors="coerce")
-
-    print("[debug] 成交金額轉為數值後前五筆：")
-    print(df["turnover"].head(5).tolist())
-
-    df = df[df["turnover"] >= min_turnover].copy()
-    df = df.sort_values(by="turnover", ascending=False).head(limit)
+    df = df.rename(columns={
+        "證券代號": "stock_id",
+        "證券名稱": "stock_name",
+        "成交金額": "turnover"
+    })
 
     df = df[["stock_id", "stock_name", "turnover"]]
-    print(f"[price_fetcher] ✅ 共取得 {len(df)} 横營股")
-    print("[price_fetcher] 前幾筆熱門股：")
+    df["turnover"] = pd.to_numeric(df["turnover"].astype(str).str.replace(",", "", regex=True), errors="coerce")
+
+    print("[debug] 成交金額最大值：", df["turnover"].max())
+    print("[debug] 未篩選前前幾筆 turnover：")
     print(df.head())
 
-    return df
+    df = df.dropna(subset=["turnover"])
+    df = df[df["turnover"] >= min_turnover]
+    df = df.sort_values(by="turnover", ascending=False).head(limit)
+
+    print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
+    print("[price_fetcher] 前幾筆熱門股：")
+    print(df[["stock_id", "stock_name", "turnover"]].head())
+
+    return df.reset_index(drop=True)
