@@ -1,4 +1,4 @@
-# ✅ run_opening.py（加上 row 印出以偵測 False 錯誤來源）
+# ✅ run_opening.py（支援三類推播：推薦 / 觀察 / 走弱）
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 from modules.strategy_profiles import get_strategy_profile
@@ -11,9 +11,8 @@ def analyze_opening():
         strategy = get_strategy_profile("opening")
         recommend_min = strategy.get("recommend_min", 6.0)
 
-        df_result = analyze_stocks_with_signals(mode="opening")
-
-        if df_result is None or df_result.empty:
+        result = analyze_stocks_with_signals(mode="opening")
+        if not result or result.get("recommended") is None:
             message = "📉 今日無符合條件的推薦股，請持續觀察市場動態。"
             send_line_message(message)
             print("[run_opening] 推播訊息組裝完成 ✅")
@@ -24,24 +23,37 @@ def analyze_opening():
 
         lines = ["📈 今日開盤推薦結果：", sentiment_note]
 
-        for idx, row in df_result.iterrows():
-            try:
-                print(f"[debug] row[{idx}] = {row.to_dict()}")  # ✅ 印出整列原始資料
-
-                label = str(row.get("label") or "📌")
-                stock_id = str(row.get("stock_id") or "")
-                stock_name = str(row.get("stock_name") or "")
-                score = str(row.get("score") or "-")
-                reasons = str(row.get("reasons") or "-")
-                suggestion = str(row.get("suggestion") or "-")
-
+        # ✅ 推薦股
+        recommended = result.get("recommended", pd.DataFrame())
+        if not recommended.empty:
+            for _, row in recommended.iterrows():
                 lines.append(
-                    f"{label}｜{stock_id} {stock_name}｜分數：{score} 分\n"
-                    f"➡️ 原因：{reasons}\n"
-                    f"💡 建議：{suggestion}\n"
+                    f"✅ 推薦股｜{row['stock_id']} {row.get('stock_name', '')}｜分數：{row['score']} 分\n"
+                    f"➡️ 原因：{row.get('reasons', '-')}\n"
+                    f"💡 建議：{row.get('suggestion', '-')}\n"
                 )
-            except Exception as row_err:
-                print(f"[run_opening] ⚠️ 單列錯誤：{repr(row_err)} at row {idx}")
+
+        # 👀 觀察股
+        fallback = result.get("fallback", pd.DataFrame())
+        if not fallback.empty:
+            lines.append("\n👀 觀察股供參考：")
+            for _, row in fallback.iterrows():
+                lines.append(
+                    f"👀 觀察股｜{row['stock_id']} {row.get('stock_name', '')}｜分數：{row['score']} 分\n"
+                    f"➡️ 原因：{row.get('reasons', '-')}\n"
+                    f"💡 建議：{row.get('suggestion', '-')}\n"
+                )
+
+        # ⚠️ 走弱股
+        weak = result.get("weak", pd.DataFrame())
+        if not weak.empty:
+            lines.append("\n⚠️ 今日走弱股提醒：")
+            for _, row in weak.iterrows():
+                lines.append(
+                    f"⚠️ 走弱股｜{row['stock_id']} {row.get('stock_name', '')}｜分數：{row['score']} 分\n"
+                    f"➡️ 原因：{row.get('reasons', '-')}\n"
+                    f"💡 建議：{row.get('suggestion', '-')}\n"
+                )
 
         message = "\n".join(lines)
         send_line_message(message)
