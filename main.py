@@ -7,28 +7,25 @@ from modules.run_opening import analyze_opening
 from modules.intraday_monitor import analyze_intraday
 from modules.dividend import analyze_dividend
 from modules.closing_summary import analyze_closing
-from modules.line_bot import send_line_message
+
 
 def main(mode: str):
     print(f"[main] 分析模式：{mode}")
 
     if mode == "opening":
-        msg = analyze_opening()
+        analyze_opening()  # ✅ 交由模組內自行推播
     elif mode == "intraday":
-        msg = analyze_intraday()
+        analyze_intraday()
     elif mode == "dividend":
-        msg = analyze_dividend()
+        analyze_dividend()
     elif mode == "closing":
-        msg = analyze_closing()
+        analyze_closing()
     else:
         print("❌ 不支援的模式，請使用 --mode=[opening|intraday|dividend|closing]")
         return
 
-    if msg:
-        send_line_message(msg)
-        print("[LINE BOT] ✅ 推播成功")
-    else:
-        print("[main] ⚠️ 無推播內容")
+    print("[main] ✅ 分析模組已執行完畢")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
