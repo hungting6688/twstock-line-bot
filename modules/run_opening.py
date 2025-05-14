@@ -1,64 +1,44 @@
+# modules/run_opening.py
+print("[run_opening] ✅ 已載入最新版")
+
 from modules.signal_analysis import analyze_stocks_with_signals
-from modules.line_bot import send_line_message
-from modules.strategy_profiles import get_strategy_profile
-from modules.market_sentiment import get_market_sentiment
+from modules.line_bot import send_line_bot_message
+from datetime import datetime
 
 def analyze_opening():
     print("[run_opening] 開始執行開盤推薦分析...")
 
     try:
-        strategy = get_strategy_profile("opening")
-        recommend_min = strategy.get("recommend_min", 6.0)
-
-        df_result = analyze_stocks_with_signals(mode="opening")
-
-        if df_result is None or df_result.empty:
-            message = "📉 今日無符合條件的推薦股，請持續觀察市場動態。"
-            send_line_message(message)
-            print("[run_opening] 推播訊息組裝完成 ✅")
-            return message
-
-        sentiment_info = get_market_sentiment() if strategy.get("apply_sentiment_adjustment", False) else None
-        sentiment_note = f"📊 市場氣氛：{sentiment_info['note']}\n" if sentiment_info else ""
-
-        lines = ["📈 今日開盤推薦結果：", sentiment_note]
-
-        # 主要推薦與觀察股推播
-        for idx, row in df_result.iterrows():
-            try:
-                label = str(row.get("label") or "📌")
-                stock_id = str(row.get("stock_id") or "")
-                stock_name = str(row.get("stock_name") or "")
-                score = str(row.get("score") or "-")
-                reasons = str(row.get("reasons") or "-")
-                suggestion = str(row.get("suggestion") or "-")
-
-                lines.append(
-                    f"{label}｜{stock_id} {stock_name}｜分數：{score} 分\n"
-                    f"➡️ 原因：{reasons}\n"
-                    f"💡 建議：{suggestion}\n"
-                )
-            except Exception as row_err:
-                print(f"[run_opening] ⚠️ 單列錯誤：{repr(row_err)} at row {idx}")
-
-        # 加入極弱股提示區塊（若有）
-        if "weak_signal" in df_result.columns:
-            weak_stocks = df_result[df_result["weak_signal"] >= 2]
-            if not weak_stocks.empty:
-                lines.append("⚠️ 近期極弱觀察股：")
-                for idx, row in weak_stocks.iterrows():
-                    lines.append(
-                        f"🚨 {row['stock_id']} {row['stock_name']}｜弱訊號數：{row['weak_signal']}"
-                    )
-
-        message = "\n".join(lines)
-        send_line_message(message)
-        print("[run_opening] 推播訊息組裝完成 ✅")
-        return message
-
+        results = analyze_stocks_with_signals(
+            strategy_name="opening",
+            limit=100,
+            min_score=7,
+            include_weak=True
+        )
     except Exception as e:
-        import traceback
-        print(f"[run_opening] ❌ 錯誤發生：{repr(e)}")
-        traceback.print_exc()
-        send_line_message("❗ 開盤推播失敗，請檢查資料格式或欄位內容。")
-        return "[run_opening] ❌ 推播失敗"
+        send_line_bot_message(f"[run_opening] ❌ 開盤分析失敗：{str(e)}")
+        return
+
+    # 組裝推播訊息
+    now = datetime.now().strftime("%Y/%m/%d")
+    message = f"📈 {now} 開盤推薦分析結果\n"
+
+    if results["recommended"]:
+        message += "\n✅ 推薦股：\n"
+        for stock in results["recommended"]:
+            message += f"🔹 {stock['stock_id']} {stock['name']}｜分數：{stock['score']}\n➡️ {stock['reason']}\n💡 建議：{stock['suggestion']}\n\n"
+    else:
+        message += "\n✅ 推薦股：無\n"
+
+    if results["watchlist"]:
+        message += "\n📌 觀察股（分數高但未達門檻）：\n"
+        for stock in results["watchlist"]:
+            message += f"🔸 {stock['stock_id']} {stock['name']}｜分數：{stock['score']}\n➡️ {stock['reason']}\n\n"
+
+    if results["weak"]:
+        message += "\n⚠️ 走弱警示股：\n"
+        for stock in results["weak"]:
+            message += f"❗ {stock['stock_id']} {stock['name']}｜走弱原因：{stock['reason']}\n"
+
+    send_line_bot_message(message.strip())
+    print("[run_opening] 推播訊息組裝完成 ✅")
