@@ -1,73 +1,84 @@
-print("[signal_analysis] ✅ 已載入最新版 (with get_top_stocks)")
+print("[fundamental_scraper] ✅ 已載入最新版")
 
+import requests
 import pandas as pd
-from modules.price_fetcher import get_top_stocks
-from modules.ta_generator import generate_technical_indicators
-from modules.strategy_profiles import get_strategy_profile
-from modules.eps_dividend_scraper import fetch_eps_dividend_data
-from modules.fundamental_scraper import fetch_fundamental_data
+from bs4 import BeautifulSoup
+import time
 
-def analyze_stocks_with_signals(strategy="default", limit=100, min_score=5, include_weak=True, **kwargs):
-    print(f"[signal_analysis] ✅ 開始整合分析流程（策略：{strategy}）...")
+def fetch_fundamental_data(stock_ids):
+    result = []
 
+    for stock_id in stock_ids:
+        try:
+            # 延遲避免被擋
+            time.sleep(0.5)
+
+            url = f"https://goodinfo.tw/tw/StockBzPerformance.asp?STOCK_ID={stock_id}"
+            headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://goodinfo.tw/tw/index.asp",
+            }
+
+            r = requests.get(url, headers=headers, timeout=10)
+            r.encoding = "utf-8"
+            soup = BeautifulSoup(r.text, "html.parser")
+
+            # 三大法人買賣超（僅當日）
+            chip_table = soup.select_one('table.b1.p4_2.r10.box_shadow')
+            if chip_table:
+                rows = chip_table.find_all("tr")
+                chip_text = str(rows[-1].text) if rows else ""
+                foreign_buy = parse_chip_text(chip_text, "外資")
+                invest_buy = parse_chip_text(chip_text, "投信")
+                dealer_buy = parse_chip_text(chip_text, "自營商")
+            else:
+                foreign_buy = invest_buy = dealer_buy = None
+
+            # 財務指標
+            pe_ratio = get_value_by_label(soup, "本益比")
+            pb_ratio = get_value_by_label(soup, "股價淨值比")
+            roe = get_value_by_label(soup, "ROE")
+
+            result.append({
+                "stock_id": stock_id,
+                "foreign_buy": foreign_buy,
+                "invest_buy": invest_buy,
+                "dealer_buy": dealer_buy,
+                "pe_ratio": pe_ratio,
+                "pb_ratio": pb_ratio,
+                "roe": roe
+            })
+
+        except Exception as e:
+            print(f"[fundamental_scraper] ⚠️ 失敗 {stock_id}：{e}")
+            continue
+
+    return pd.DataFrame(result)
+
+
+def get_value_by_label(soup, label):
     try:
-        # 熱門股代碼清單
-        stock_ids = get_top_stocks(limit=limit)
-        print(f"[signal_analysis] ⏳ 擷取熱門股清單（共 {len(stock_ids)} 檔）")
+        cells = soup.find_all("td")
+        for i, td in enumerate(cells):
+            if label in td.text:
+                value_text = cells[i + 1].text.strip().replace("%", "")
+                return float(value_text)
+    except:
+        return None
 
-        # 擷取資料
-        price_df = generate_technical_indicators(stock_ids)
-        eps_df = fetch_eps_dividend_data(stock_ids)
-        fund_df = fetch_fundamental_data(stock_ids)
 
-        # 整合所有資料
-        merged = price_df.merge(eps_df, on="stock_id", how="left")
-        merged = merged.merge(fund_df, on="stock_id", how="left")
-        merged = merged.dropna(subset=["score"], how="all")
-
-        # 套用策略設定
-        strategy_profile = get_strategy_profile(strategy)
-        score_col = "score"
-        merged[score_col] = 0
-
-        # 根據技術指標加權評分
-        for col, weight in strategy_profile["weights"].items():
-            merged[score_col] += merged.get(col, 0) * weight
-
-        # 生成建議與標籤
-        def get_label(row):
-            if row[score_col] >= min_score:
-                return "✅ 推薦"
-            elif include_weak and row[score_col] <= -3:
-                return "⚠️ 走弱"
-            else:
-                return "📌 觀察"
-
-        def get_comment(score):
-            if score >= 8:
-                return "建議立即列入關注清單"
-            elif score >= 6:
-                return "建議密切觀察進出點"
-            elif score >= 3:
-                return "建議觀察，不宜追高"
-            elif score >= 0:
-                return "建議暫不進場"
-            else:
-                return "不建議操作"
-
-        merged["label"] = merged.apply(get_label, axis=1)
-        merged["comment"] = merged[score_col].apply(get_comment)
-
-        # 推薦與觀察股
-        recommended = merged[merged["label"] == "✅ 推薦"]
-        if recommended.empty:
-            fallback = merged.sort_values(by=score_col, ascending=False).head(8)
-            print("[signal_analysis] ⚠️ 無推薦股，顯示觀察股 top N")
-            return fallback
-        else:
-            top = recommended.sort_values(by=score_col, ascending=False).head(8)
-            return top
-
-    except Exception as e:
-        print(f"[signal_analysis] ❌ 分析過程錯誤：{e}")
-        return pd.DataFrame()
+def parse_chip_text(text, keyword):
+    try:
+        start = text.find(keyword)
+        if start == -1:
+            return None
+        sub = text[start:]
+        number = ""
+        for char in sub:
+            if char in "0123456789-,":
+                number += char
+            elif char == "張":
+                break
+        return int(number.replace(",", ""))
+    except:
+        return None
