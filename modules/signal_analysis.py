@@ -1,4 +1,3 @@
-# modules/signal_analysis.py
 print("[signal_analysis] ✅ 已載入最新版 (with get_top_stocks)")
 
 import pandas as pd
@@ -19,7 +18,12 @@ def analyze_stocks_with_signals(strategy_name="default", **kwargs):
         print("[signal_analysis] ❌ 無法取得股價資料")
         return {"recommended": [], "watchlist": [], "weak": []}
 
-    stock_ids = stock_data["證券代號"].tolist()
+    # 限制分析股數
+    limit = profile.get("limit", None)
+    if limit:
+        stock_data = stock_data.sort_values("成交金額", ascending=False).head(limit)
+
+    stock_ids = stock_data["證券代號"].astype(str).tolist()
     ta_signals = generate_ta_signals(stock_ids)
     eps_data = fetch_eps_dividend_data(stock_ids)
     fundamental_data = fetch_fundamental_data(stock_ids)
@@ -34,7 +38,7 @@ def analyze_stocks_with_signals(strategy_name="default", **kwargs):
 
     df["score"] = sum(df[key] * weight for key, weight in weights.items())
 
-    # 市場情緒加權
+    # 市場情緒加減權
     sentiment_score = get_market_sentiment_score()
     df["score"] += sentiment_score * profile.get("sentiment_boost_weight", 0)
 
