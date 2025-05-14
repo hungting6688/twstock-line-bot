@@ -1,39 +1,29 @@
 # modules/price_fetcher.py
 print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 
-import requests
 import pandas as pd
+from datetime import datetime
+import requests
+from io import StringIO
 
-def get_top_stocks(limit=100, filter_type=None):
-    try:
-        url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=&type=ALL"
-        res = requests.get(url, timeout=10)
-        data = res.json()
+def fetch_price_data(stock_ids=None):
+    """暫不處理個股歷史價格（已棄用），統一交由 signal_analysis 管理"""
+    return {}
 
-        # 找到成交金額資料的 table
-        for table in data["tables"]:
-            df = pd.DataFrame(table["data"], columns=table["fields"])
-            if "證券代號" in df.columns and "成交金額" in df.columns:
-                break
-        else:
-            raise ValueError("無法找到有效的熱門股資料")
+def fetch_top_stocks_from_twse(min_turnover=50000000):
+    print("[price_fetcher] 🔍 從 TWSE 擷取即時熱門股資料...")
 
-        df["成交金額"] = pd.to_numeric(df["成交金額"].str.replace(",", ""), errors="coerce")
-        df = df.sort_values(by="成交金額", ascending=False)
+    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"
+    response = requests.get(url)
+    csv_text = "\n".join([line for line in response.text.splitlines() if len(line.split('","')) > 10])
+    df = pd.read_csv(StringIO(csv_text))
 
-        df["證券代號"] = df["證券代號"].astype(str)
-        all_ids = df["證券代號"].tolist()
+    df = df.rename(columns=lambda x: x.strip())
+    df = df[["證券代號", "證券名稱", "成交金額"]].copy()
+    df["成交金額"] = pd.to_numeric(df["成交金額"].astype(str).str.replace(",", ""), errors="coerce")
+    df = df.dropna(subset=["成交金額"])
+    df = df[df["成交金額"] > min_turnover]
+    df = df.reset_index(drop=True)
 
-        print("[price_fetcher] 🔍 熱門股前幾筆資料預覽：")
-        print(df[["證券代號", "證券名稱", "成交金額"]].head(10))
-
-        if filter_type == "small_cap":
-            return all_ids[50:50+limit]
-        elif filter_type == "large_cap":
-            return all_ids[:limit]
-        else:
-            return all_ids[:limit]
-
-    except Exception as e:
-        print(f"[price_fetcher] ⚠️ 熱門股讀取失敗：{e}")
-        return ["2330", "2317", "2454", "2303", "2882"][:limit]
+    print(f"[price_fetcher] ✅ 熱門股數量：{len(df)}")
+    return df
