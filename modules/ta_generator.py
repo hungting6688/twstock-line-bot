@@ -1,41 +1,57 @@
-# ✅ ta_generator.py
+print("[ta_generator] ✅ 已載入最新版 (技術指標計算)")
+
+import yfinance as yf
 import pandas as pd
 
-def generate_technical_signals(df):
-    print("[ta_generator] ✅ 產生技術指標欄位")
+def generate_technical_indicators(stock_ids):
+    results = []
 
-    df = df.copy()
-    df["close"] = pd.to_numeric(df["close"], errors="coerce")
+    for stock_id in stock_ids:
+        try:
+            symbol = f"{stock_id}.TW"
+            df = yf.download(symbol, period="3mo", interval="1d", progress=False)
 
-    # MA20
-    df["ma20"] = df["close"].rolling(window=20).mean()
-    df["ma_signal"] = df["close"] > df["ma20"]
+            if df is None or df.empty or len(df) < 20:
+                continue
 
-    # Bollinger Band
-    df["bb_mean"] = df["close"].rolling(window=20).mean()
-    df["bb_std"] = df["close"].rolling(window=20).std()
-    df["bollinger_signal"] = df["close"] > (df["bb_mean"] + df["bb_std"] * 1)
+            df["MA20"] = df["Close"].rolling(window=20).mean()
+            df["STD"] = df["Close"].rolling(window=20).std()
+            df["Upper"] = df["MA20"] + 2 * df["STD"]
+            df["Lower"] = df["MA20"] - 2 * df["STD"]
 
-    # RSI (14)
-    delta = df["close"].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            df["EMA12"] = df["Close"].ewm(span=12, adjust=False).mean()
+            df["EMA26"] = df["Close"].ewm(span=26, adjust=False).mean()
+            df["MACD"] = df["EMA12"] - df["EMA26"]
+            df["Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+
+            df["RSI"] = compute_rsi(df["Close"], 14)
+            df["Low_K"] = df["Low"].rolling(window=9).min()
+            df["High_K"] = df["High"].rolling(window=9).max()
+            df["K"] = 100 * (df["Close"] - df["Low_K"]) / (df["High_K"] - df["Low_K"])
+            df["D"] = df["K"].rolling(window=3).mean()
+
+            latest = df.iloc[-1]
+
+            result = {
+                "stock_id": stock_id,
+                "macd_golden": int(latest["MACD"] > latest["Signal"]),
+                "kd_golden": int(latest["K"] > latest["D"]),
+                "rsi_strong": int(latest["RSI"] > 50),
+                "ma_up": int(latest["Close"] > latest["MA20"]),
+                "bb_breakout": int(latest["Close"] > latest["Upper"]),
+            }
+
+            results.append(result)
+
+        except Exception as e:
+            print(f"[ta_generator] ⚠️ 技術指標失敗：{stock_id} - {e}")
+            continue
+
+    return pd.DataFrame(results)
+
+def compute_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
-    df["rsi"] = 100 - (100 / (1 + rs))
-    df["rsi_signal"] = df["rsi"] > 70
-
-    # KD (9)
-    low_min = df["close"].rolling(window=9).min()
-    high_max = df["close"].rolling(window=9).max()
-    rsv = (df["close"] - low_min) / (high_max - low_min) * 100
-    df["kdj_k"] = rsv.ewm(com=2).mean()
-    df["kdj_d"] = df["kdj_k"].ewm(com=2).mean()
-    df["kdj_signal"] = df["kdj_k"] > df["kdj_d"]
-
-    # MACD
-    ema12 = df["close"].ewm(span=12).mean()
-    ema26 = df["close"].ewm(span=26).mean()
-    df["macd"] = ema12 - ema26
-    df["macd_signal"] = df["macd"] > 0
-
-    return df
+    return 100 - (100 / (1 + rs))
