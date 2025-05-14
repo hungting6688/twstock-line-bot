@@ -19,9 +19,15 @@ def fetch_price_data(limit=100):
         cleaned_csv = "\n".join(lines)
 
         df = pd.read_csv(StringIO(cleaned_csv))
-        df = df.rename(columns=lambda x: x.strip())  # 清理欄位名稱空格
-        df = df[["證券代號", "證券名稱", "成交金額"]].copy()
+        df.columns = df.columns.str.strip()
+        print(f"[price_fetcher] 取得欄位名稱：{df.columns.tolist()}")
 
+        required_cols = ["證券代號", "證券名稱", "成交金額"]
+        for col in required_cols:
+            if col not in df.columns:
+                raise ValueError(f"缺少欄位：{col}，實際欄位：{df.columns.tolist()}")
+
+        df = df[required_cols].copy()
         df["成交金額"] = df["成交金額"].replace(",", "", regex=True).astype(float)
         df = df.sort_values("成交金額", ascending=False).head(limit)
 
