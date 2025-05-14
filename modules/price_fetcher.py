@@ -16,25 +16,30 @@ def fetch_price_data(limit=100):
         resp = requests.get(url, headers=headers, timeout=10)
         content = resp.content.decode("big5", errors="ignore")
 
-        # 只保留包含「證券代號」欄位的資料表
+        # 找到包含必要欄位的資料區段（以證券代號、證券名稱開頭）
         lines = content.splitlines()
-        data_lines = [line for line in lines if line.strip().startswith("證券代號")]
-        if not data_lines:
-            raise ValueError("❌ 找不到正確欄位開頭")
+        useful_lines = []
+        recording = False
+        for line in lines:
+            if '證券代號' in line and '證券名稱' in line:
+                recording = True
+                useful_lines.append(line)
+            elif recording:
+                if line.strip() == "":
+                    break
+                useful_lines.append(line)
 
-        start_index = lines.index(data_lines[0])
-        csv_data = "\n".join(lines[start_index:])
+        if not useful_lines:
+            raise ValueError("❌ 找不到正確欄位資料段")
 
-        df = pd.read_csv(StringIO(csv_data))
+        df = pd.read_csv(StringIO("\n".join(useful_lines)))
 
-        required_columns = ['證券代號', '證券名稱', '成交金額', '收盤價']
-        if not all(col in df.columns for col in required_columns):
-            raise ValueError(f"❌ 缺少必要欄位，請檢查 TWSE 原始格式\n[price_fetcher] 欄位名稱： {df.columns.tolist()}")
+        required = ['證券代號', '證券名稱', '成交金額', '收盤價']
+        if not all(col in df.columns for col in required):
+            raise ValueError(f"❌ 缺少必要欄位，實際欄位為：{df.columns.tolist()}")
 
-        df = df[required_columns].copy()
-        df['成交金額'] = df['成交金額'].astype(str).str.replace(',', '', regex=False).astype(float)
-        df = df.sort_values(by='成交金額', ascending=False).head(limit)
-        df = df.reset_index(drop=True)
+        df['成交金額'] = df['成交金額'].astype(str).str.replace(",", "", regex=False).astype(float)
+        df = df.sort_values(by='成交金額', ascending=False).head(limit).reset_index(drop=True)
 
         print(f"[price_fetcher] ✅ 已成功擷取 {len(df)} 檔熱門股")
         return df
