@@ -10,7 +10,6 @@ from modules.strategy_profiles import get_strategy_profile
 def analyze_stocks_with_signals(mode="opening"):
     print("[signal_analysis] ✅ 開始整合分析流程...")
 
-    # 取得策略配置
     strategy = get_strategy_profile(mode)
     min_turnover = strategy.get("min_turnover", 5000)
     price_limit = strategy.get("price_limit", 100)
@@ -41,7 +40,7 @@ def analyze_stocks_with_signals(mode="opening"):
     print("[signal_analysis] 📊 計算技術分數與投資建議...")
     df = score_technical_signals(df, strategy, sentiment_info)
 
-    # 排除無分數資料
+    # 過濾無分數資料
     scored_df = df[df["score"].notna()].copy()
     if scored_df.empty:
         print("[signal_analysis] ⚠️ 無分數評分結果")
@@ -49,7 +48,7 @@ def analyze_stocks_with_signals(mode="opening"):
 
     scored_df.sort_values(by="score", ascending=False, inplace=True)
 
-    # 分類 label
+    # 標記推薦/觀察股
     min_score = strategy.get("min_score", 5.0)
     recommend_min = strategy.get("recommend_min", 6.0)
     recommend_max = strategy.get("recommend_max", 8)
@@ -67,12 +66,20 @@ def analyze_stocks_with_signals(mode="opening"):
     scored_df["suggestion"] = scored_df["suggestion"].fillna("-")
     scored_df["reasons"] = scored_df["reasons"].fillna("-")
 
+    # 提取極弱股（預設走弱訊號大於等於2）
+    weak_stocks = scored_df[scored_df.get("weak_signal", 0) >= 2]
+    if not weak_stocks.empty:
+        print(f"[signal_analysis] 🚨 偵測到 {len(weak_stocks)} 檔極弱股")
+
     # 擷出推薦股
     final_df = scored_df[scored_df["label"] == "✅ 推薦股"].head(recommend_max)
 
     if final_df.empty and strategy.get("include_weak", False):
         fallback_df = scored_df.head(fallback_top_n).copy()
+        fallback_df["label"] = fallback_df["label"].replace("🚫 不建議", "👀 觀察股")
         print("[signal_analysis] ⚠️ 無推薦股票，顯示觀察股供參考")
         return fallback_df
 
+    # 若需要回傳極弱股供推播，可改為回傳 tuple：
+    # return final_df.reset_index(drop=True), weak_stocks.reset_index(drop=True)
     return final_df.reset_index(drop=True)
