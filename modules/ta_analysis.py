@@ -1,11 +1,10 @@
-# ✅ ta_analysis.py
-
 def score_technical_signals(df, strategy, sentiment_info=None):
     print("[ta_analysis] ✅ 開始評分")
 
     df = df.copy()
     score = pd.Series(0, index=df.index, dtype="float")
     reasons = [[] for _ in range(len(df))]
+    weak_signal_count = pd.Series(0, index=df.index, dtype="int")
 
     def add_reason(i, condition, reason_text, weight):
         nonlocal score, reasons
@@ -13,12 +12,32 @@ def score_technical_signals(df, strategy, sentiment_info=None):
             score[i] += weight
             reasons[i].append(reason_text)
 
+    def check_weak(i, condition):
+        nonlocal weak_signal_count
+        if condition is False:
+            weak_signal_count[i] += 1
+
     for i, row in df.iterrows():
-        add_reason(i, row.get("macd_signal"), "MACD黃金交叉", strategy.get("macd", 1))
-        add_reason(i, row.get("kdj_signal"), "KD黃金交叉", strategy.get("kdj", 0.5))
-        add_reason(i, row.get("rsi_signal"), "RSI走強", strategy.get("rsi", 0.5))
-        add_reason(i, row.get("ma_signal"), "站上均線", strategy.get("ma", 1))
-        add_reason(i, row.get("bollinger_signal"), "布林通道偏多", strategy.get("bollinger", 0.5))
+        # 技術加分 + 走弱記錄
+        macd = row.get("macd_signal")
+        add_reason(i, macd, "MACD黃金交叉", strategy.get("macd", 1))
+        check_weak(i, macd)
+
+        kdj = row.get("kdj_signal")
+        add_reason(i, kdj, "KD黃金交叉", strategy.get("kdj", 0.5))
+        check_weak(i, kdj)
+
+        rsi = row.get("rsi_signal")
+        add_reason(i, rsi, "RSI走強", strategy.get("rsi", 0.5))
+        check_weak(i, rsi)
+
+        ma = row.get("ma_signal")
+        add_reason(i, ma, "站上均線", strategy.get("ma", 1))
+        check_weak(i, ma)
+
+        boll = row.get("bollinger_signal")
+        add_reason(i, boll, "布林通道偏多", strategy.get("bollinger", 0.5))
+        check_weak(i, boll)
 
         # 基本面
         add_reason(i, row.get("eps_growth", 0) > 0, "EPS成長", strategy.get("eps_growth", 1))
@@ -44,8 +63,10 @@ def score_technical_signals(df, strategy, sentiment_info=None):
     if sentiment_info:
         score *= sentiment_info.get("factor", 1.0)
 
+    # 加入欄位
     df["score"] = score.clip(0, strategy.get("limit_score", 7.0))
     df["reasons"] = ["、".join(r) if r else "-" for r in reasons]
+    df["weak_signal"] = weak_signal_count
 
     # 白話建議
     df["suggestion"] = df["score"].apply(lambda s: "建議立即列入關注清單" if s >= strategy.get("recommend_min", 6) else
