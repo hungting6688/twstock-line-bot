@@ -1,52 +1,52 @@
-import requests
-from datetime import datetime
+# market_sentiment.py
+import yfinance as yf
+from datetime import datetime, timedelta
 
-def get_market_sentiment():
+
+def fetch_market_sentiment():
     """
-    擷取台股加權指數資料，回傳市場氣氛評估結果
-    回傳範例：
-    {
-        "sentiment_score": 1,   # 1=正向, 0=中性, -1=負向
-        "note": "加權指數上漲 0.85%，市場氣氛偏多"
+    根據全球主要指數（台股、日經、港股、美股）漲跌幅與成交量
+    回傳市場情緒分數（越高表示市場越偏多）
+    """
+    indices = {
+        "^TWII": "台股加權",
+        "^N225": "日經",
+        "^HSI": "恆生",
+        "^GSPC": "標普500",
+        "^IXIC": "那斯達克",
     }
-    """
-    print("[market_sentiment] ⏳ 擷取台股加權指數資料...")
 
-    try:
-        today_str = datetime.today().strftime("%Y%m%d")
-        url = f"https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_INDEX?response=json&date={today_str}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        res = requests.get(url, headers=headers, timeout=10)
-        data = res.json()
-        rows = data.get("data", [])
+    today = datetime.today()
+    yesterday = today - timedelta(days=3)
 
-        if not rows or len(rows) < 2:
-            print("[market_sentiment] ⚠️ 資料不足")
-            return {"sentiment_score": 0, "note": "今日資料不足，視為中性"}
+    score = 0
+    max_score = len(indices) * 2
 
-        # 過濾非法數值
-        def safe_float(value):
-            try:
-                return float(value.replace(",", ""))
-            except:
-                return None
+    for symbol, name in indices.items():
+        try:
+            df = yf.download(symbol, start=yesterday.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'))
+            if df.empty or len(df) < 2:
+                continue
 
-        first = safe_float(rows[0][1])
-        last = safe_float(rows[-1][1])
+            prev = df.iloc[-2]
+            curr = df.iloc[-1]
 
-        if first is None or last is None or first == 0:
-            print("[market_sentiment] ⚠️ 數值轉換失敗")
-            return {"sentiment_score": 0, "note": "加權指數解析錯誤，視為中性"}
+            price_change = (curr["Close"] - prev["Close"]) / prev["Close"]
+            vol_change = (curr["Volume"] - prev["Volume"]) / prev["Volume"]
 
-        percent_change = (last - first) / first * 100
+            if price_change > 0:
+                score += 1
+            if vol_change > 0:
+                score += 1
+        except Exception as e:
+            print(f"[market_sentiment] ⚠️ 無法取得 {name}：{e}")
+            continue
 
-        if percent_change > 0.5:
-            return {"sentiment_score": 1, "note": f"加權指數上漲 {percent_change:.2f}%，市場氣氛偏多"}
-        elif percent_change < -0.5:
-            return {"sentiment_score": -1, "note": f"加權指數下跌 {percent_change:.2f}%，市場氣氛偏空"}
-        else:
-            return {"sentiment_score": 0, "note": f"加權指數變動 {percent_change:.2f}%，市場氣氛中性"}
+    sentiment_ratio = score / max_score  # 正規化為 0~1
 
-    except Exception as e:
-        print(f"[market_sentiment] ❌ 擷取失敗：{e}")
-        return {"sentiment_score": 0, "note": "擷取失敗，視為中性"}
+    if sentiment_ratio >= 0.75:
+        return "bullish"
+    elif sentiment_ratio >= 0.4:
+        return "neutral"
+    else:
+        return "bearish"
