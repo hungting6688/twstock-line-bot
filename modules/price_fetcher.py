@@ -14,49 +14,42 @@ def fetch_price_data(limit=100):
         response.encoding = "big5"
         raw_text = response.text
 
+        # 找出正確資料區段（含「證券代號」開頭）
         lines = raw_text.split("\n")
         content_lines = []
+        capture = False
         for line in lines:
-            if re.match(r'^"?\d{4}"?,', line) and line.count(",") >= 10:
+            if "證券代號" in line and "證券名稱" in line:
+                capture = True
                 content_lines.append(line)
+                continue
+            if capture:
+                if re.match(r'^\d{4}', line):  # 股票代號為四碼數字
+                    content_lines.append(line)
+                else:
+                    break  # 表格區塊結束
 
-        if not content_lines:
-            print("[price_fetcher] ❌ 擷取失敗：無法從回傳內容中擷取有效表格（content_lines 為空）")
-            return pd.DataFrame()
+        if not content_lines or len(content_lines) < 2:
+            raise ValueError("無法從回傳內容中擷取有效表格（content_lines 為空）")
 
         cleaned_csv = "\n".join(content_lines)
-        df = pd.read_csv(StringIO(cleaned_csv), header=None)
+        df = pd.read_csv(StringIO(cleaned_csv))
+        df.columns = df.columns.str.strip()
+        print(f"[price_fetcher] ✅ 擷取欄位名稱：{df.columns.tolist()}")
 
-        df.columns = [f"col{i}" for i in range(df.shape[1])]
-        df = df.rename(columns={
-            "col0": "stock_id",
-            "col1": "name",
-            "col9": "成交金額"
-        })
+        # 保留必要欄位
+        df = df[["證券代號", "證券名稱", "成交金額"]].copy()
+        df.columns = ["stock_id", "name", "成交金額"]
 
-        df = df[["stock_id", "name", "成交金額"]].copy()
+        # 過濾非數值成交金額
+        df = df[df["成交金額"].astype(str).str.replace(",", "").str.strip().str.match(r'^\d+(\.\d+)?$')]
+        df["成交金額"] = df["成交金額"].replace(",", "", regex=True).astype(float)
 
-        # 嘗試轉換金額，無法轉換者略過（如 ETF/指數）
-        cleaned_data = []
-        for _, row in df.iterrows():
-            try:
-                amount = float(str(row["成交金額"]).replace(",", "").strip())
-                stock_id = str(row["stock_id"]).strip().strip('"')
-                if stock_id.isdigit():
-                    cleaned_data.append({
-                        "stock_id": stock_id,
-                        "name": str(row["name"]).strip(),
-                        "成交金額": amount
-                    })
-            except:
-                continue
+        df = df.sort_values("成交金額", ascending=False).head(limit)
+        df.reset_index(drop=True, inplace=True)
 
-        final_df = pd.DataFrame(cleaned_data)
-        final_df = final_df.sort_values("成交金額", ascending=False).head(limit)
-        final_df.reset_index(drop=True, inplace=True)
-
-        print(f"[price_fetcher] ✅ 成功取得 {len(final_df)} 檔熱門股")
-        return final_df
+        print(f"[price_fetcher] ✅ 成功取得 {len(df)} 檔熱門股")
+        return df
 
     except Exception as e:
         print(f"[price_fetcher] ❌ 擷取失敗：{e}")
