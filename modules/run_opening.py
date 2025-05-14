@@ -1,3 +1,4 @@
+# modules/run_opening.py
 print("[run_opening] ✅ 已載入最新版")
 
 from modules.signal_analysis import analyze_stocks_with_signals
@@ -9,7 +10,7 @@ def analyze_opening():
 
     try:
         results = analyze_stocks_with_signals(
-            mode="opening",  # ✅ 修正 key 名稱為 mode（與 signal_analysis 相符）
+            mode="opening",  # ✅ 確保 key 名稱正確
             limit=100,
             min_score=7,
             include_weak=True
@@ -18,10 +19,14 @@ def analyze_opening():
         send_line_bot_message(f"[run_opening] ❌ 開盤分析失敗：{str(e)}")
         return
 
+    if not results or not isinstance(results, list):
+        send_line_bot_message("[run_opening] ❌ 未取得有效的分析結果")
+        return
+
     # 整理分群
-    recommended = [r for r in results if r["label"] == "✅ 推薦"]
-    watchlist = [r for r in results if r["label"] == "📌 觀察"]
-    weaklist = [r for r in results if r["label"] == "⚠️ 走弱"]
+    recommended = [r for r in results if r.get("label") == "✅ 推薦"]
+    watchlist = [r for r in results if r.get("label") == "📌 觀察"]
+    weaklist = [r for r in results if r.get("label") == "⚠️ 走弱"]
 
     # 組裝推播訊息
     now = datetime.now().strftime("%Y/%m/%d")
