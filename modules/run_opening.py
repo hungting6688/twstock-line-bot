@@ -1,4 +1,3 @@
-# modules/run_opening.py
 print("[run_opening] ✅ 已載入最新版")
 
 from modules.signal_analysis import analyze_stocks_with_signals
@@ -10,7 +9,7 @@ def analyze_opening():
 
     try:
         results = analyze_stocks_with_signals(
-            strategy_name="opening",
+            mode="opening",  # ✅ 修正 key 名稱為 mode（與 signal_analysis 相符）
             limit=100,
             min_score=7,
             include_weak=True
@@ -19,26 +18,31 @@ def analyze_opening():
         send_line_bot_message(f"[run_opening] ❌ 開盤分析失敗：{str(e)}")
         return
 
+    # 整理分群
+    recommended = [r for r in results if r["label"] == "✅ 推薦"]
+    watchlist = [r for r in results if r["label"] == "📌 觀察"]
+    weaklist = [r for r in results if r["label"] == "⚠️ 走弱"]
+
     # 組裝推播訊息
     now = datetime.now().strftime("%Y/%m/%d")
     message = f"📈 {now} 開盤推薦分析結果\n"
 
-    if results["recommended"]:
+    if recommended:
         message += "\n✅ 推薦股：\n"
-        for stock in results["recommended"]:
-            message += f"🔹 {stock['stock_id']} {stock['name']}｜分數：{stock['score']}\n➡️ {stock['reason']}\n💡 建議：{stock['suggestion']}\n\n"
+        for stock in recommended:
+            message += f"🔹 {stock['stock_id']} {stock['name']}｜分數：{stock['score']}\n"
     else:
         message += "\n✅ 推薦股：無\n"
 
-    if results["watchlist"]:
-        message += "\n📌 觀察股（分數高但未達門檻）：\n"
-        for stock in results["watchlist"]:
-            message += f"🔸 {stock['stock_id']} {stock['name']}｜分數：{stock['score']}\n➡️ {stock['reason']}\n\n"
+    if watchlist:
+        message += "\n📌 觀察股：\n"
+        for stock in watchlist:
+            message += f"🔸 {stock['stock_id']} {stock['name']}｜分數：{stock['score']}\n"
 
-    if results["weak"]:
-        message += "\n⚠️ 走弱警示股：\n"
-        for stock in results["weak"]:
-            message += f"❗ {stock['stock_id']} {stock['name']}｜走弱原因：{stock['reason']}\n"
+    if weaklist:
+        message += "\n⚠️ 走弱股：\n"
+        for stock in weaklist:
+            message += f"❗ {stock['stock_id']} {stock['name']}｜分數：{stock['score']}\n"
 
     send_line_bot_message(message.strip())
     print("[run_opening] 推播訊息組裝完成 ✅")
