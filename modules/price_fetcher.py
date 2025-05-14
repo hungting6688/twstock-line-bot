@@ -14,32 +14,30 @@ def fetch_price_data(limit=100):
         response.encoding = "big5"
         raw_text = response.text
 
-        # 找到開始於「證券代號」表格區段之後的內容
+        # 解析出真正的個股資料表格（開頭為 4 碼代號、逗號超過 10 格者）
         lines = raw_text.split("\n")
-        start = False
         content_lines = []
-
         for line in lines:
-            if "證券代號" in line and "證券名稱" in line and "成交金額" in line:
-                start = True
+            if re.match(r'^"?\d{4}"?,', line) and line.count(",") >= 10:
                 content_lines.append(line)
-                continue
-            if start:
-                if re.match(r'^\d{4}', line):
-                    content_lines.append(line)
-                else:
-                    break  # 一旦不是股票代碼行，就結束擷取
 
-        if not content_lines or len(content_lines) <= 1:
-            raise ValueError("無法從回傳內容中擷取有效表格（content_lines 為空）")
+        if not content_lines:
+            print("[price_fetcher] ❌ 擷取失敗：無法從回傳內容中擷取有效表格（content_lines 為空）")
+            return pd.DataFrame()
 
-        df = pd.read_csv(StringIO("\n".join(content_lines)))
-        df.columns = df.columns.str.strip()
-        print(f"[price_fetcher] ✅ 原始欄位：{df.columns.tolist()}")
+        cleaned_csv = "\n".join(content_lines)
+        df = pd.read_csv(StringIO(cleaned_csv), header=None)
 
-        df = df[["證券代號", "證券名稱", "成交金額"]].copy()
-        df.columns = ["stock_id", "name", "成交金額"]
-        df["成交金額"] = df["成交金額"].replace(",", "", regex=True).astype(float)
+        # 自動對應欄位：證券代號、名稱、成交金額
+        df.columns = [f"col{i}" for i in range(df.shape[1])]
+        df = df.rename(columns={
+            "col0": "stock_id",
+            "col1": "name",
+            "col9": "成交金額"
+        })
+
+        df = df[["stock_id", "name", "成交金額"]].copy()
+        df["成交金額"] = df["成交金額"].astype(str).str.replace(",", "").astype(float)
         df = df.sort_values("成交金額", ascending=False).head(limit)
         df.reset_index(drop=True, inplace=True)
 
