@@ -14,19 +14,19 @@ def analyze_stocks_with_signals(strategy_name="default", **kwargs):
     profile = strategy_profiles.get(strategy_name, strategy_profiles["default"])
     profile.update(kwargs)
 
-    stock_data = fetch_price_data()
+    stock_data = fetch_price_data(limit=profile["limit"])
     if stock_data.empty:
         print("[signal_analysis] ❌ 無法取得股價資料")
         return {"recommended": [], "watchlist": [], "weak": []}
 
-    stock_ids = stock_data["證券代號"].tolist()
+    stock_ids = stock_data["stock_id"].tolist()
     ta_signals = generate_ta_signals(stock_ids)
     eps_data = fetch_eps_dividend_data(stock_ids)
     fundamental_data = fetch_fundamental_data(stock_ids)
 
-    df = stock_data.merge(ta_signals, on="證券代號", how="left")
-    df = df.merge(eps_data, on="證券代號", how="left")
-    df = df.merge(fundamental_data, on="證券代號", how="left")
+    df = stock_data.merge(ta_signals, on="stock_id", how="left")
+    df = df.merge(eps_data, on="stock_id", how="left")
+    df = df.merge(fundamental_data, on="stock_id", how="left")
 
     weights = profile["weights"]
     for key in weights:
@@ -34,15 +34,13 @@ def analyze_stocks_with_signals(strategy_name="default", **kwargs):
 
     df["score"] = sum(df[key] * weight for key, weight in weights.items())
 
-    # 市場情緒加權
     sentiment_score = get_market_sentiment_score()
     df["score"] += sentiment_score * profile.get("sentiment_boost_weight", 0)
 
-    # 小型股 or 大型股條件篩選
     if profile.get("filter_type") == "small_cap":
-        df = df[df["成交金額"] < 5e8]
+        df = df[df["turnover"] < 5e8]
     elif profile.get("filter_type") == "large_cap":
-        df = df[df["成交金額"] >= 5e8]
+        df = df[df["turnover"] >= 5e8]
 
     df = df.sort_values("score", ascending=False)
 
@@ -57,14 +55,14 @@ def analyze_stocks_with_signals(strategy_name="default", **kwargs):
 
     seen = set()
     for _, row in pd.concat([recommended, fallback]).iterrows():
-        sid = row["證券代號"]
+        sid = row["stock_id"]
         if sid in seen:
             continue
         seen.add(sid)
 
         item = {
             "stock_id": sid,
-            "name": row["證券名稱"],
+            "name": row["name"],
             "score": round(row["score"], 1),
             "reason": explain_reasons(row, weights),
             "suggestion": get_suggestion(row["score"]),
@@ -79,8 +77,8 @@ def analyze_stocks_with_signals(strategy_name="default", **kwargs):
         weak_df = df[df["score"] <= 1].sort_values("score").head(2)
         for _, row in weak_df.iterrows():
             result["weak"].append({
-                "stock_id": row["證券代號"],
-                "name": row["證券名稱"],
+                "stock_id": row["stock_id"],
+                "name": row["name"],
                 "score": round(row["score"], 1),
                 "reason": "綜合評分過低，請留意走弱風險"
             })
