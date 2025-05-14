@@ -1,48 +1,40 @@
 # modules/price_fetcher.py
-print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 
 import pandas as pd
-import requests
 from io import StringIO
-from datetime import datetime
+import requests
+
+print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 
 def fetch_price_data(limit=100):
     print("[price_fetcher] ⏳ 擷取台股熱門股清單（來自 TWSE CSV）...")
-
-    today = datetime.today().strftime("%Y%m%d")
-    csv_url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={today}&type=ALL"
+    
+    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"
+    headers = { "User-Agent": "Mozilla/5.0" }
 
     try:
-        response = requests.get(csv_url, timeout=10)
-        response.encoding = "utf-8"
-        raw_text = response.text
+        resp = requests.get(url, headers=headers, timeout=10)
+        content = resp.content.decode("big5", errors="ignore")  # ✅ 解決亂碼問題
+        raw_df = pd.read_csv(StringIO(content))
 
-        # 清理 CSV，只保留包含逗號多的資料列
-        lines = [line for line in raw_text.splitlines() if line.count('",') >= 10]
-        cleaned = "\n".join(lines)
-        df = pd.read_csv(StringIO(cleaned))
+        # 過濾只保留上市股票清單（第5欄為數字者）
+        df = raw_df[raw_df.columns[:17]].dropna()
+        df.columns = df.columns.str.strip()
+        df = df[df[df.columns[5]].astype(str).str.replace(',', '').str.isnumeric()]
 
-        # 印出實際欄位確認
-        print("[price_fetcher] 欄位名稱：", df.columns.tolist())
+        df.columns = [
+            '證券代號', '證券名稱', '成交股數', '成交筆數', '成交金額',
+            '開盤價', '最高價', '最低價', '收盤價', '漲跌(+/-)',
+            '漲跌價差', '最後揭示買價', '最後揭示買量', '最後揭示賣價',
+            '最後揭示賣量', '本益比', 'Unnamed: 16'
+        ]
 
-        # 重新命名欄位、轉換欄位名稱
-        df.columns = [col.strip().replace('"', '') for col in df.columns]
-        df = df.rename(columns=lambda x: x.strip())
+        df['成交金額'] = df['成交金額'].astype(str).str.replace(',', '', regex=False).astype(float)
+        df = df.sort_values(by='成交金額', ascending=False).head(limit)
 
-        expected_cols = ["證券代號", "證券名稱", "成交股數", "成交金額", "收盤價"]
-        if not all(col in df.columns for col in expected_cols):
-            raise ValueError("❌ 缺少必要欄位，請檢查 TWSE 原始格式")
-
-        df = df[expected_cols].copy()
-        df = df.dropna(subset=["成交金額", "成交股數"])
-
-        # 轉數字
-        df["成交金額"] = df["成交金額"].astype(str).str.replace(",", "").astype(float) * 1000
-        df = df.sort_values("成交金額", ascending=False).head(limit).reset_index(drop=True)
-
-        print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
-        return df
+        print(f"[price_fetcher] ✅ 已成功擷取 {len(df)} 檔熱門股")
+        return df[['證券代號', '證券名稱', '成交金額', '收盤價']].reset_index(drop=True)
 
     except Exception as e:
-        print(f"[price_fetcher] ❌ 擷取失敗：{str(e)}")
+        print(f"[price_fetcher] ❌ 擷取失敗：{e}")
         return pd.DataFrame()
