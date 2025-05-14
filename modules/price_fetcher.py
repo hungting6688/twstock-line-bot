@@ -14,7 +14,6 @@ def fetch_price_data(limit=100):
         response.encoding = "big5"
         raw_text = response.text
 
-        # 解析出真正的個股資料表格（開頭為 4 碼代號、逗號超過 10 格者）
         lines = raw_text.split("\n")
         content_lines = []
         for line in lines:
@@ -28,7 +27,6 @@ def fetch_price_data(limit=100):
         cleaned_csv = "\n".join(content_lines)
         df = pd.read_csv(StringIO(cleaned_csv), header=None)
 
-        # 自動對應欄位：證券代號、名稱、成交金額
         df.columns = [f"col{i}" for i in range(df.shape[1])]
         df = df.rename(columns={
             "col0": "stock_id",
@@ -37,12 +35,28 @@ def fetch_price_data(limit=100):
         })
 
         df = df[["stock_id", "name", "成交金額"]].copy()
-        df["成交金額"] = df["成交金額"].astype(str).str.replace(",", "").astype(float)
-        df = df.sort_values("成交金額", ascending=False).head(limit)
-        df.reset_index(drop=True, inplace=True)
 
-        print(f"[price_fetcher] ✅ 成功取得 {len(df)} 檔熱門股")
-        return df
+        # 嘗試轉換金額，無法轉換者略過（如 ETF/指數）
+        cleaned_data = []
+        for _, row in df.iterrows():
+            try:
+                amount = float(str(row["成交金額"]).replace(",", "").strip())
+                stock_id = str(row["stock_id"]).strip().strip('"')
+                if stock_id.isdigit():
+                    cleaned_data.append({
+                        "stock_id": stock_id,
+                        "name": str(row["name"]).strip(),
+                        "成交金額": amount
+                    })
+            except:
+                continue
+
+        final_df = pd.DataFrame(cleaned_data)
+        final_df = final_df.sort_values("成交金額", ascending=False).head(limit)
+        final_df.reset_index(drop=True, inplace=True)
+
+        print(f"[price_fetcher] ✅ 成功取得 {len(final_df)} 檔熱門股")
+        return final_df
 
     except Exception as e:
         print(f"[price_fetcher] ❌ 擷取失敗：{e}")
