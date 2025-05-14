@@ -1,56 +1,66 @@
-# modules/eps_dividend_scraper.py
+print("[eps_dividend_scraper] ✅ 已載入最新版（含 int 清洗與字串轉換）")
 
 import requests
-import pandas as pd
 from bs4 import BeautifulSoup
+import pandas as pd
+import re
 
-def fetch_eps_dividend_data(stock_ids, limit=20):
-    print(f"[eps_dividend_scraper] 開始擷取 EPS / 殖利率 / YTD（最多 {limit} 檔）...")
+def clean_stock_id(stock_id):
+    return str(stock_id).replace('="', '').replace('"', '').strip()
 
+def fetch_eps_dividend_data(stock_ids, max_count=100):
+    print(f"[eps_dividend_scraper] 開始擷取 EPS / 殖利率 / YTD（最多 {max_count} 檔）...")
     result = []
+    base_url = "https://mops.twse.com.tw/mops/web/ajax_t05st09"
 
-    for i, stock_id in enumerate(stock_ids[:limit]):
-        print(f"[eps_dividend_scraper] 第 {i+1} 檔：{stock_id}")
+    for idx, stock_id in enumerate(stock_ids[:max_count], 1):
+        stock_id = clean_stock_id(stock_id)
+        print(f"[eps_dividend_scraper] 第 {idx} 檔：{stock_id}")
+
         try:
-            url = f'https://mops.twse.com.tw/mops/web/ajax_t05st09?encodeURIComponent=1&step=1&firstin=1&off=1&keyword4={stock_id}'
-            headers = { "User-Agent": "Mozilla/5.0" }
-            resp = requests.get(url, headers=headers, timeout=10)
+            int(stock_id)  # 防止 ETF 錯誤格式
+
+            resp = requests.get(base_url, params={
+                'encodeURIComponent': '1',
+                'step': '1',
+                'firstin': '1',
+                'off': '1',
+                'keyword4': stock_id
+            }, timeout=10)
+
             soup = BeautifulSoup(resp.text, "html.parser")
-            tables = soup.find_all("table")
+            table = soup.find("table", class_="hasBorder")
+            if not table:
+                raise ValueError("無法找到資料表格")
 
-            eps_growth = 0  # 0 表示沒成長，1 表示成長
-            dividend_yield = 0.0
-            ytd_return = 0.0
+            rows = table.find_all("tr")[1:]  # 跳過標題列
+            eps_values = []
+            dividend = 0
 
-            # 擷取 EPS 資料
-            if len(tables) >= 2:
-                rows = tables[1].find_all("tr")
-                eps_values = []
-                for r in rows[2:]:
-                    cols = r.find_all("td")
-                    if len(cols) > 4:
-                        try:
-                            eps = float(cols[4].text.strip())
-                            eps_values.append(eps)
-                        except:
-                            continue
-                if len(eps_values) >= 2 and eps_values[-1] > eps_values[-2]:
-                    eps_growth = 1
+            for row in rows:
+                cols = [col.text.strip() for col in row.find_all(["td", "th"])]
+                if len(cols) >= 8:
+                    try:
+                        eps = float(cols[7])  # 每股盈餘位置
+                        eps_values.append(eps)
+                    except:
+                        continue
+                if len(cols) >= 10:
+                    try:
+                        dividend = float(cols[9])
+                    except:
+                        pass
 
-            # 模擬殖利率與 YTD（保留可替換結構）
-            dividend_yield = round(2 + (int(stock_id[-1]) % 3), 2)
-            ytd_return = round((int(stock_id[-2:]) % 20 - 10) / 10, 2)
-
+            eps_sum = sum(eps_values[-4:]) if eps_values else 0  # 最近四季 EPS
             result.append({
                 "證券代號": stock_id,
-                "EPS_YOY": eps_growth,
-                "殖利率": dividend_yield,
-                "YTD報酬率": ytd_return
+                "EPS": eps_sum,
+                "殖利率": dividend,
+                "YTD報酬率": None,  # 保留後續補上漲幅資訊
             })
 
         except Exception as e:
             print(f"[eps_dividend_scraper] ❌ 擷取失敗：{stock_id} → {e}")
 
-    df = pd.DataFrame(result)
-    print(f"[eps_dividend_scraper] ✅ 擷取完成，共 {len(df)} 檔")
-    return df
+    print(f"[eps_dividend_scraper] ✅ 擷取完成，共 {len(result)} 檔")
+    return pd.DataFrame(result)
