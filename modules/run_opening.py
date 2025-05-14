@@ -9,12 +9,7 @@ def analyze_opening():
     print("[run_opening] 開始執行開盤推薦分析...")
 
     try:
-        results = analyze_stocks_with_signals(
-            mode="opening",  # ✅ 確保 key 名稱正確
-            limit=100,
-            min_score=7,
-            include_weak=True
-        )
+        results = analyze_stocks_with_signals(mode="opening")
     except Exception as e:
         send_line_bot_message(f"[run_opening] ❌ 開盤分析失敗：{str(e)}")
         return
@@ -23,12 +18,12 @@ def analyze_opening():
         send_line_bot_message("[run_opening] ❌ 未取得有效的分析結果")
         return
 
-    # 整理分群
+    # 分類結果
     recommended = [r for r in results if r.get("label") == "✅ 推薦"]
     watchlist = [r for r in results if r.get("label") == "📌 觀察"]
     weaklist = [r for r in results if r.get("label") == "⚠️ 走弱"]
 
-    # 組裝推播訊息
+    # 組裝訊息
     now = datetime.now().strftime("%Y/%m/%d")
     message = f"📈 {now} 開盤推薦分析結果\n"
 
