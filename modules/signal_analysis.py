@@ -8,13 +8,12 @@ from modules.fundamental_scraper import fetch_fundamental_data
 from modules.strategy_profiles import get_strategy_profile
 from modules.market_sentiment import get_market_sentiment_score
 
-
 def analyze_stocks_with_signals(mode="default", limit=100, min_score=7, include_weak=False):
     print(f"[signal_analysis] ✅ 開始整合分析流程（策略：{mode}）...")
 
     try:
         price_df = fetch_price_data(limit=limit)
-        if not isinstance(price_df, pd.DataFrame) or price_df.empty:
+        if not isinstance(price_df, pd.DataFrame) or price_df.empty or "stock_id" not in price_df.columns:
             raise ValueError("取得的股價資料無效，啟動 fallback 模式")
     except Exception as e:
         print(f"[signal_analysis] ⚠️ 發生錯誤：{e}，將以空資料處理")
