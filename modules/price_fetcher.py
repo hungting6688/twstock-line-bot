@@ -14,39 +14,28 @@ def fetch_price_data(limit=100):
         response.encoding = "big5"
         raw_text = response.text
 
-        # 找出標題與數據行
+        # 擷取表格資料（從證券代號開頭）
         lines = raw_text.split("\n")
         content_lines = []
-        found_header = False
+        start = False
 
-        for i, line in enumerate(lines):
-            if not found_header:
-                if "證券代號" in line and "證券名稱" in line:
-                    found_header = True
-                    content_lines.append(line)
-            else:
-                if re.match(r'^\d{4}', line):
-                    content_lines.append(line)
-                elif found_header:
-                    break
+        for line in lines:
+            if re.match(r'^\d{4}', line):  # 以 4 碼數字開頭的股票代號
+                start = True
+                content_lines.append(line)
+            elif start and line.count(",") >= 10:
+                content_lines.append(line)
+            elif start and line.strip() == "":
+                break  # 到空行停止
 
-        if not content_lines or len(content_lines) < 2:
+        if not content_lines:
             raise ValueError("無法從回傳內容中擷取有效表格（content_lines 為空）")
 
         cleaned_csv = "\n".join(content_lines)
-        df = pd.read_csv(StringIO(cleaned_csv), header=0)
-        df.columns = df.columns.str.strip()
-        print(f"[price_fetcher] ✅ 擷取欄位名稱：{df.columns.tolist()}")
+        df = pd.read_csv(StringIO(cleaned_csv), header=None)
 
-        # 自動對應我們需要的欄位
-        col_id = next((col for col in df.columns if "證券代號" in col), None)
-        col_name = next((col for col in df.columns if "證券名稱" in col), None)
-        col_value = next((col for col in df.columns if "成交金額" in col), None)
-
-        if not all([col_id, col_name, col_value]):
-            raise ValueError(f"缺少必要欄位：{df.columns.tolist()}")
-
-        df = df[[col_id, col_name, col_value]].copy()
+        # 使用明確欄位索引定位
+        df = df[[0, 1, 4]]  # 0: 證券代號, 1: 證券名稱, 4: 成交金額
         df.columns = ["stock_id", "name", "成交金額"]
 
         df["成交金額"] = pd.to_numeric(df["成交金額"].astype(str).str.replace(",", ""), errors="coerce")
