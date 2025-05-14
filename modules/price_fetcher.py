@@ -13,12 +13,16 @@ def fetch_price_data(limit=100):
         response = requests.get(url, timeout=10)
         response.encoding = "big5"
         raw_text = response.text
-
-        # 只擷取表格區塊：從開頭包含數字代碼（四碼）直到表格結尾（含逗號數量判斷）
         lines = raw_text.split("\n")
+
+        # DEBUG：印出前 30 行觀察格式
+        print("[price_fetcher] 🧐 DEBUG：顯示前 30 行 TWSE 原始資料")
+        print("\n".join(lines[:30]))
+
+        # 放寬擷取條件：只要以四碼代碼開頭，且至少有 5 個逗號就保留
         content_lines = []
         for line in lines:
-            if re.match(r'^\d{4}', line) and line.count(',') >= 10:
+            if re.match(r'^\d{4}', line) and line.count(',') >= 5:
                 content_lines.append(line)
 
         if not content_lines:
