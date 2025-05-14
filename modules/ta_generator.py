@@ -29,8 +29,8 @@ def generate_ta_signals(stock_ids):
             rsv = (df["Close"] - low_min) / (high_max - low_min) * 100
             df["K"] = rsv.ewm(com=2).mean()
             df["D"] = df["K"].ewm(com=2).mean()
-            k = float(df["K"].iloc[-1])
-            d = float(df["D"].iloc[-1])
+            k = float(df["K"].iloc[-1]) if not df["K"].isna().all() else 0
+            d = float(df["D"].iloc[-1]) if not df["D"].isna().all() else 0
 
             # RSI
             delta = df["Close"].diff()
