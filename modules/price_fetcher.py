@@ -21,6 +21,9 @@ def fetch_price_data(limit=100):
             if re.match(r'^\d{4}', line) and line.count(',') >= 10:
                 content_lines.append(line)
 
+        if not content_lines:
+            raise ValueError("無法從回傳內容中擷取有效表格（content_lines 為空）")
+
         cleaned_csv = "\n".join(content_lines)
         df = pd.read_csv(StringIO(cleaned_csv))
         df.columns = df.columns.str.strip()
