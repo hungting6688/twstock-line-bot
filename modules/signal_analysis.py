@@ -1,85 +1,73 @@
+print("[signal_analysis] ✅ 已載入最新版 (with get_top_stocks)")
+
 import pandas as pd
-from modules.price_fetcher import fetch_price_data
-from modules.eps_dividend_scraper import fetch_eps_dividend_data as fetch_eps_and_dividend
-from modules.fundamental_scraper import fetch_fundamental_data
-from modules.ta_generator import generate_technical_signals
-from modules.ta_analysis import score_technical_signals
-from modules.market_sentiment import get_market_sentiment
+from modules.price_fetcher import get_top_stocks
+from modules.ta_generator import generate_technical_indicators
 from modules.strategy_profiles import get_strategy_profile
+from modules.eps_dividend_scraper import fetch_eps_dividend_data
+from modules.fundamental_scraper import fetch_fundamental_data
 
-def analyze_stocks_with_signals(mode="opening"):
-    print("[signal_analysis] ✅ 開始整合分析流程...")
+def analyze_stocks_with_signals(strategy="default", limit=100, min_score=5, include_weak=True, **kwargs):
+    print(f"[signal_analysis] ✅ 開始整合分析流程（策略：{strategy}）...")
 
-    strategy = get_strategy_profile(mode)
-    min_turnover = strategy.get("min_turnover", 5000)
-    price_limit = strategy.get("price_limit", 100)
+    try:
+        # 熱門股代碼清單
+        stock_ids = get_top_stocks(limit=limit)
+        print(f"[signal_analysis] ⏳ 擷取熱門股清單（共 {len(stock_ids)} 檔）")
 
-    print("[signal_analysis] ⏳ 擷取熱門股清單...")
-    price_df = fetch_price_data(min_turnover=min_turnover, limit=price_limit, mode=mode, strategy=strategy)
-    if price_df.empty:
-        print("[signal_analysis] ⚠️ 熱門股清單為空，終止分析")
-        return None
-    print(f"[signal_analysis] 🔍 共擷取到 {len(price_df)} 檔股票")
+        # 擷取資料
+        price_df = generate_technical_indicators(stock_ids)
+        eps_df = fetch_eps_dividend_data(stock_ids)
+        fund_df = fetch_fundamental_data(stock_ids)
 
-    print(f"[signal_analysis] ⏳ 擷取 EPS 與殖利率資料（最多 {len(price_df)} 檔）...")
-    eps_df = fetch_eps_and_dividend(price_df["stock_id"].tolist())
+        # 整合所有資料
+        merged = price_df.merge(eps_df, on="stock_id", how="left")
+        merged = merged.merge(fund_df, on="stock_id", how="left")
+        merged = merged.dropna(subset=["score"], how="all")
 
-    print("[signal_analysis] ⏳ 擷取法人買賣超資料...")
-    fundamental_df = fetch_fundamental_data()
+        # 套用策略設定
+        strategy_profile = get_strategy_profile(strategy)
+        score_col = "score"
+        merged[score_col] = 0
 
-    print("[signal_analysis] 🔧 合併所有來源資料...")
-    df = price_df.merge(eps_df, on="stock_id", how="left")
-    df = df.merge(fundamental_df, on="stock_id", how="left")
+        # 根據技術指標加權評分
+        for col, weight in strategy_profile["weights"].items():
+            merged[score_col] += merged.get(col, 0) * weight
 
-    print("[signal_analysis] ⚙️ 產生技術指標欄位...")
-    df = generate_technical_signals(df)
+        # 生成建議與標籤
+        def get_label(row):
+            if row[score_col] >= min_score:
+                return "✅ 推薦"
+            elif include_weak and row[score_col] <= -3:
+                return "⚠️ 走弱"
+            else:
+                return "📌 觀察"
 
-    sentiment_info = get_market_sentiment() if strategy.get("apply_sentiment_adjustment", False) else None
-    print(f"[signal_analysis] 📈 市場氣氛：{sentiment_info['note']} ➔ 分數乘以 {sentiment_info['factor']}" if sentiment_info else "")
+        def get_comment(score):
+            if score >= 8:
+                return "建議立即列入關注清單"
+            elif score >= 6:
+                return "建議密切觀察進出點"
+            elif score >= 3:
+                return "建議觀察，不宜追高"
+            elif score >= 0:
+                return "建議暫不進場"
+            else:
+                return "不建議操作"
 
-    print("[signal_analysis] 📊 計算技術分數與投資建議...")
-    df = score_technical_signals(df, strategy, sentiment_info)
+        merged["label"] = merged.apply(get_label, axis=1)
+        merged["comment"] = merged[score_col].apply(get_comment)
 
-    # 過濾無分數資料
-    scored_df = df[df["score"].notna()].copy()
-    if scored_df.empty:
-        print("[signal_analysis] ⚠️ 無分數評分結果")
-        return None
-
-    scored_df.sort_values(by="score", ascending=False, inplace=True)
-
-    # 標記推薦/觀察股
-    min_score = strategy.get("min_score", 5.0)
-    recommend_min = strategy.get("recommend_min", 6.0)
-    recommend_max = strategy.get("recommend_max", 8)
-    fallback_top_n = strategy.get("fallback_top_n", 5)
-
-    def assign_label(score):
-        if score >= recommend_min:
-            return "✅ 推薦股"
-        elif score >= min_score:
-            return "👀 觀察股"
+        # 推薦與觀察股
+        recommended = merged[merged["label"] == "✅ 推薦"]
+        if recommended.empty:
+            fallback = merged.sort_values(by=score_col, ascending=False).head(8)
+            print("[signal_analysis] ⚠️ 無推薦股，顯示觀察股 top N")
+            return fallback
         else:
-            return "🚫 不建議"
+            top = recommended.sort_values(by=score_col, ascending=False).head(8)
+            return top
 
-    scored_df["label"] = scored_df["score"].apply(assign_label)
-    scored_df["suggestion"] = scored_df["suggestion"].fillna("-")
-    scored_df["reasons"] = scored_df["reasons"].fillna("-")
-
-    # 提取極弱股（預設走弱訊號大於等於2）
-    weak_stocks = scored_df[scored_df.get("weak_signal", 0) >= 2]
-    if not weak_stocks.empty:
-        print(f"[signal_analysis] 🚨 偵測到 {len(weak_stocks)} 檔極弱股")
-
-    # 擷出推薦股
-    final_df = scored_df[scored_df["label"] == "✅ 推薦股"].head(recommend_max)
-
-    if final_df.empty and strategy.get("include_weak", False):
-        fallback_df = scored_df.head(fallback_top_n).copy()
-        fallback_df["label"] = fallback_df["label"].replace("🚫 不建議", "👀 觀察股")
-        print("[signal_analysis] ⚠️ 無推薦股票，顯示觀察股供參考")
-        return fallback_df
-
-    # 若需要回傳極弱股供推播，可改為回傳 tuple：
-    # return final_df.reset_index(drop=True), weak_stocks.reset_index(drop=True)
-    return final_df.reset_index(drop=True)
+    except Exception as e:
+        print(f"[signal_analysis] ❌ 分析過程錯誤：{e}")
+        return pd.DataFrame()
