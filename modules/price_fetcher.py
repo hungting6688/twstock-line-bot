@@ -2,6 +2,7 @@ print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 
 import pandas as pd
 import requests
+import csv
 from io import StringIO
 from datetime import datetime
 
@@ -13,29 +14,30 @@ def fetch_price_data(limit=100):
 
     try:
         response = requests.get(url, timeout=10)
-        csv_text = response.text
+        raw_text = response.text
 
-        # 清理 CSV 字串：移除空行與亂碼
-        lines = csv_text.split("\n")
-        clean_lines = [line.strip() for line in lines if line.strip() and len(line.split(",")) > 10]
-        clean_csv = "\n".join(clean_lines)
+        # 擷取包含「證券代號」的表格開始行
+        data_lines = []
+        found_header = False
+        for line in raw_text.splitlines():
+            if "證券代號" in line:
+                found_header = True
+            if found_header:
+                data_lines.append(line)
+            if found_header and line.count(",") <= 1:
+                break  # 表格結束
 
+        clean_csv = "\n".join(data_lines).strip()
         df = pd.read_csv(StringIO(clean_csv))
 
-        expected_columns = ['證券代號', '證券名稱', '成交股數', '成交金額', '收盤價']
-        if not all(col in df.columns for col in expected_columns):
-            print(f"[price_fetcher] ❌ 擷取失敗：缺少必要欄位 {expected_columns}")
-            return pd.DataFrame()
+        expected = ["證券代號", "證券名稱", "成交股數", "成交金額", "收盤價"]
+        df = df[expected].copy()
+        df.columns = expected
 
-        df = df[expected_columns].copy()
-        df.columns = ["證券代號", "證券名稱", "成交股數", "成交金額", "收盤價"]
-
-        # 數值清洗
         df["成交金額"] = (
             df["成交金額"].astype(str).str.replace(",", "", regex=False)
         ).astype(float)
 
-        # 排序 + 限制數量
         df = df.sort_values("成交金額", ascending=False).head(limit).reset_index(drop=True)
         print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
         return df
