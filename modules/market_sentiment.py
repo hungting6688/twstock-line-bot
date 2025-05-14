@@ -1,13 +1,10 @@
-# market_sentiment.py
+# modules/market_sentiment.py
+print("[market_sentiment] ✅ 已載入最新版")
+
 import yfinance as yf
 from datetime import datetime, timedelta
 
-
-def fetch_market_sentiment():
-    """
-    根據全球主要指數（台股、日經、港股、美股）漲跌幅與成交量
-    回傳市場情緒分數（越高表示市場越偏多）
-    """
+def get_market_sentiment_score():
     indices = {
         "^TWII": "台股加權",
         "^N225": "日經",
@@ -22,31 +19,20 @@ def fetch_market_sentiment():
     score = 0
     max_score = len(indices) * 2
 
-    for symbol, name in indices.items():
+    for symbol in indices:
         try:
             df = yf.download(symbol, start=yesterday.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'))
             if df.empty or len(df) < 2:
                 continue
-
-            prev = df.iloc[-2]
-            curr = df.iloc[-1]
-
-            price_change = (curr["Close"] - prev["Close"]) / prev["Close"]
-            vol_change = (curr["Volume"] - prev["Volume"]) / prev["Volume"]
-
-            if price_change > 0:
-                score += 1
-            if vol_change > 0:
+            pct_change = (df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]
+            if pct_change > 0.01:
+                score += 2
+            elif pct_change > 0:
                 score += 1
         except Exception as e:
-            print(f"[market_sentiment] ⚠️ 無法取得 {name}：{e}")
+            print(f"[market_sentiment] ❌ 無法讀取 {symbol}：{e}")
             continue
 
-    sentiment_ratio = score / max_score  # 正規化為 0~1
-
-    if sentiment_ratio >= 0.75:
-        return "bullish"
-    elif sentiment_ratio >= 0.4:
-        return "neutral"
-    else:
-        return "bearish"
+    normalized_score = round((score / max_score) * 10, 1)  # 轉為 0~10 分數
+    print(f"[market_sentiment] ✅ 市場情緒評分：{normalized_score}/10")
+    return normalized_score
