@@ -1,4 +1,4 @@
-print("[ta_generator] ✅ 已載入最新版（修正 .iloc[-1] 判斷錯誤）")
+print("[ta_generator] ✅ 已載入最新版（加速與清洗修正）")
 
 import yfinance as yf
 import pandas as pd
@@ -10,20 +10,22 @@ def generate_ta_signals(stock_ids):
 
     for stock_id in tqdm(stock_ids, desc="[ta_generator] 計算技術指標"):
         try:
-            df = yf.download(f"{stock_id}.TW", period="60d", progress=False)
+            # ETF 排除處理：移除開頭與結尾的 " 或 = 符號
+            clean_id = str(stock_id).replace("=\"", "").replace("\"", "").strip()
+            df = yf.download(f"{clean_id}.TW", period="60d", progress=False)
             if df.empty or len(df) < 30:
                 continue
             df = df.dropna().copy()
             df.reset_index(inplace=True)
 
-            # MACD
+            # 計算 MACD
             df["EMA12"] = df["Close"].ewm(span=12).mean()
             df["EMA26"] = df["Close"].ewm(span=26).mean()
             df["MACD"] = df["EMA12"] - df["EMA26"]
             df["Signal"] = df["MACD"].ewm(span=9).mean()
             macd_signal = int(df["MACD"].iloc[-1] > df["Signal"].iloc[-1])
 
-            # KD
+            # KD 指標
             low_min = df["Low"].rolling(window=9).min()
             high_max = df["High"].rolling(window=9).max()
             rsv = (df["Close"] - low_min) / (high_max - low_min) * 100
@@ -45,16 +47,16 @@ def generate_ta_signals(stock_ids):
             # 均線
             ma5 = df["Close"].rolling(window=5).mean()
             ma20 = df["Close"].rolling(window=20).mean()
-            ma_score = int(ma5.iloc[-1] > ma20.iloc[-1]) if not ma5.isna().all() and not ma20.isna().all() else 0
+            ma_score = int(ma5.iloc[-1] > ma20.iloc[-1]) if not ma5.isna().all() else 0
 
             # 布林通道
             mavg = df["Close"].rolling(window=20).mean()
             std = df["Close"].rolling(window=20).std()
             upper = mavg + 2 * std
-            bb_signal = int(df["Close"].iloc[-1] > upper.iloc[-1]) if not mavg.isna().all() and not upper.isna().all() else 0
+            bb_signal = int(df["Close"].iloc[-1] > upper.iloc[-1]) if not mavg.isna().all() else 0
 
             results.append({
-                "證券代號": stock_id,
+                "證券代號": clean_id,
                 "MACD": macd_signal,
                 "K": k,
                 "D": d,
