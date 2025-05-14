@@ -4,18 +4,16 @@ import yfinance as yf
 import pandas as pd
 from tqdm import tqdm
 
-def generate_technical_indicators(stock_ids):
+def generate_ta_signals(stock_ids):
     print("[ta_generator] ⏳ 開始計算技術指標...")
     results = []
 
     for stock_id in tqdm(stock_ids, desc="[ta_generator] 計算技術指標"):
         try:
-            stock_id = str(stock_id).replace("=\"", "").replace("\"", "").strip()
-            df = yf.download(f"{stock_id}.TW", period="60d", progress=False, threads=False)
-
+            clean_id = str(stock_id).replace("=\"", "").replace("\"", "").strip()
+            df = yf.download(f"{clean_id}.TW", period="60d", progress=False)
             if df.empty or len(df) < 30:
                 continue
-
             df = df.dropna().copy()
             df.reset_index(inplace=True)
 
@@ -24,7 +22,9 @@ def generate_technical_indicators(stock_ids):
             df["EMA26"] = df["Close"].ewm(span=26).mean()
             df["MACD"] = df["EMA12"] - df["EMA26"]
             df["Signal"] = df["MACD"].ewm(span=9).mean()
-            macd_signal = int(df["MACD"].iloc[-1] > df["Signal"].iloc[-1])
+            macd_signal = 0
+            if not df["MACD"].isna().all() and not df["Signal"].isna().all():
+                macd_signal = int(df["MACD"].iloc[-1] > df["Signal"].iloc[-1])
 
             # KD
             low_min = df["Low"].rolling(window=9).min()
@@ -32,44 +32,42 @@ def generate_technical_indicators(stock_ids):
             rsv = (df["Close"] - low_min) / (high_max - low_min) * 100
             df["K"] = rsv.ewm(com=2).mean()
             df["D"] = df["K"].ewm(com=2).mean()
-            k_val = float(df["K"].iloc[-1])
-            d_val = float(df["D"].iloc[-1])
-            kd_cross = int(k_val > d_val and k_val < 80)
+            k = float(df["K"].iloc[-1]) if not df["K"].isna().all() else 0
+            d = float(df["D"].iloc[-1]) if not df["D"].isna().all() else 0
 
             # RSI
             delta = df["Close"].diff()
-            gain = delta.clip(lower=0)
-            loss = -delta.clip(upper=0)
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
             avg_gain = gain.rolling(window=14).mean()
             avg_loss = loss.rolling(window=14).mean()
             rs = avg_gain / avg_loss
             rsi = 100 - (100 / (1 + rs))
             rsi_val = float(rsi.iloc[-1]) if not rsi.isna().all() else 0
-            rsi_score = int(rsi_val > 50)
 
-            # MA
+            # 均線
             ma5 = df["Close"].rolling(window=5).mean()
             ma20 = df["Close"].rolling(window=20).mean()
-            ma_signal = int(ma5.iloc[-1] > ma20.iloc[-1]) if not ma5.isna().all() and not ma20.isna().all() else 0
+            ma_score = 0
+            if not ma5.isna().all() and not ma20.isna().all():
+                ma_score = int(ma5.iloc[-1] > ma20.iloc[-1])
 
-            # Bollinger Band
+            # 布林通道
             mavg = df["Close"].rolling(window=20).mean()
             std = df["Close"].rolling(window=20).std()
             upper = mavg + 2 * std
-            bb_signal = int(df["Close"].iloc[-1] > upper.iloc[-1]) if not mavg.isna().all() else 0
-
-            score = macd_signal + kd_cross + rsi_score + ma_signal + bb_signal
+            bb_signal = 0
+            if not upper.isna().all():
+                bb_signal = int(df["Close"].iloc[-1] > upper.iloc[-1])
 
             results.append({
-                "stock_id": stock_id,
+                "證券代號": clean_id,
                 "MACD": macd_signal,
-                "K": k_val,
-                "D": d_val,
+                "K": k,
+                "D": d,
                 "RSI": rsi_val,
-                "MA": ma_signal,
-                "Bollinger": bb_signal,
-                "score": score,
-                "is_weak": rsi_val < 30 and ma_signal == 0,
+                "均線": ma_score,
+                "布林通道": bb_signal,
             })
 
         except Exception as e:
