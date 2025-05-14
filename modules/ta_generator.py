@@ -10,7 +10,6 @@ def generate_ta_signals(stock_ids):
 
     for stock_id in tqdm(stock_ids, desc="[ta_generator] 計算技術指標"):
         try:
-            # ETF 排除處理：移除開頭與結尾的 " 或 = 符號
             clean_id = str(stock_id).replace("=\"", "").replace("\"", "").strip()
             df = yf.download(f"{clean_id}.TW", period="60d", progress=False)
             if df.empty or len(df) < 30:
@@ -18,14 +17,14 @@ def generate_ta_signals(stock_ids):
             df = df.dropna().copy()
             df.reset_index(inplace=True)
 
-            # 計算 MACD
+            # MACD
             df["EMA12"] = df["Close"].ewm(span=12).mean()
             df["EMA26"] = df["Close"].ewm(span=26).mean()
             df["MACD"] = df["EMA12"] - df["EMA26"]
             df["Signal"] = df["MACD"].ewm(span=9).mean()
             macd_signal = int(df["MACD"].iloc[-1] > df["Signal"].iloc[-1])
 
-            # KD 指標
+            # KD
             low_min = df["Low"].rolling(window=9).min()
             high_max = df["High"].rolling(window=9).max()
             rsv = (df["Close"] - low_min) / (high_max - low_min) * 100
