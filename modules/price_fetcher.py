@@ -1,50 +1,44 @@
 print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 
-import pandas as pd
 import requests
-import csv
+import pandas as pd
 from io import StringIO
 from datetime import datetime
 
-def fetch_price_data(limit=100, log_path="fetch_price_log.txt"):
+def fetch_price_data(limit=100):
     print("[price_fetcher] ⏳ 擷取台股熱門股清單（來自 TWSE CSV）...")
-
-    today = datetime.now().strftime("%Y%m%d")
-    url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={today}&type=ALL"
-
     try:
+        url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={}&type=ALL".format(datetime.today().strftime("%Y%m%d"))
         response = requests.get(url, timeout=10)
-        raw_text = response.text
+        content = response.text
 
-        # 擷取包含「證券代號」的表格開始行
-        data_lines = []
-        found_header = False
-        for line in raw_text.splitlines():
-            if "證券代號" in line:
-                found_header = True
-            if found_header:
-                data_lines.append(line)
-            if found_header and line.count(",") <= 1:
-                break  # 表格結束
+        # 移除開頭與非資料列
+        lines = [line for line in content.split('\n') if line.count(',') > 10]
+        csv_data = '\n'.join(lines)
+        df = pd.read_csv(StringIO(csv_data))
 
-        clean_csv = "\n".join(data_lines).strip()
-        df = pd.read_csv(StringIO(clean_csv))
+        df = df.rename(columns={
+            df.columns[0]: "證券代號",
+            df.columns[1]: "證券名稱",
+            df.columns[2]: "成交股數",
+            df.columns[4]: "成交金額"
+        })
 
-        expected = ["證券代號", "證券名稱", "成交股數", "成交金額", "收盤價"]
-        df = df[expected].copy()
-        df.columns = expected
+        # 處理逗號與無效值
+        df = df.dropna(subset=["證券代號", "成交金額"])
+        df["成交金額"] = df["成交金額"].astype(str).str.replace(",", "", regex=False)
+        df["成交金額"] = pd.to_numeric(df["成交金額"], errors="coerce")
+        df = df.dropna(subset=["成交金額"])
 
-        df["成交金額"] = (
-            df["成交金額"].astype(str).str.replace(",", "", regex=False)
-        ).astype(float)
+        # 排除 ETF（證券代號為非數字）
+        df = df[df["證券代號"].astype(str).str.isnumeric()]
 
-        df = df.sort_values("成交金額", ascending=False).head(limit).reset_index(drop=True)
-        print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
-        return df
+        # 篩選成交金額前 limit 檔
+        df = df.sort_values(by="成交金額", ascending=False).head(limit)
+        stock_ids = df["證券代號"].astype(str).tolist()
+        print(f"[price_fetcher] ✅ 擷取完成，共 {len(stock_ids)} 檔")
+        return stock_ids
 
     except Exception as e:
-        error_msg = f"[price_fetcher] ❌ 擷取失敗：{e}"
-        print(error_msg)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"{datetime.now().isoformat()} - {error_msg}\n")
-        return pd.DataFrame()
+        print(f"[price_fetcher] ❌ 擷取失敗：{e}")
+        return []
