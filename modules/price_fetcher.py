@@ -5,8 +5,8 @@ import requests
 from io import StringIO
 import re
 
-def fetch_price_data():
-    print("[price_fetcher] ⏳ 擷取台股熱門股清單（來自 TWSE CSV）...")
+def fetch_price_data(limit=100):
+    print(f"[price_fetcher] ⏳ 擷取台股熱門股清單（前 {limit} 檔，來自 TWSE CSV）...")
     url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"
 
     try:
@@ -17,14 +17,7 @@ def fetch_price_data():
         lines = raw_text.split("\n")
         content_lines = []
         for line in lines:
-            # 跳過指數類或非股票資料
-            if re.match(r'^\d{4}', line) and line.count(',') >= 10:
-                fields = line.split(',')
-                if len(fields) < 10:
-                    continue
-                stock_id = fields[0].strip().replace('"', '')
-                if stock_id.startswith(('00', '01')) or not stock_id.isdigit():  # 00~01多為ETF或指數
-                    continue
+            if re.match(r'^"\d{4}"', line) and line.count(",") >= 10:
                 content_lines.append(line)
 
         if not content_lines:
@@ -32,15 +25,22 @@ def fetch_price_data():
 
         cleaned_csv = "\n".join(content_lines)
         df = pd.read_csv(StringIO(cleaned_csv), header=None)
-        df.columns = ["證券代號", "證券名稱", "成交股數", "成交筆數", "成交金額"] + list(df.columns[5:])
 
-        df["成交金額"] = df["成交金額"].replace(",", "", regex=True)
-        df = df[pd.to_numeric(df["成交金額"], errors="coerce").notnull()]
-        df["成交金額"] = df["成交金額"].astype(float)
+        # 嘗試定位欄位順序
+        df.columns = [
+            "證券代號", "證券名稱", "_1", "_2", "_3", "_4", "_5", "_6",
+            "成交金額", "_8", "_9", "_10", "_11", "_12", "_13", "_14"
+        ][:df.shape[1]]
 
-        df = df.sort_values("成交金額", ascending=False)
         df = df[["證券代號", "證券名稱", "成交金額"]].copy()
-        df.columns = ["stock_id", "name", "成交金額"]
+        df["成交金額"] = pd.to_numeric(df["成交金額"].astype(str).str.replace(",", ""), errors="coerce")
+        df.dropna(subset=["成交金額"], inplace=True)
+
+        # 排除 ETF 與指數類股票（多半為英文名、代號非四碼或非數字）
+        df = df[df["證券代號"].str.match(r'^\d{4}$')]
+        df = df.sort_values("成交金額", ascending=False).head(limit)
+
+        df = df.rename(columns={"證券代號": "stock_id", "證券名稱": "name"})
         df.reset_index(drop=True, inplace=True)
 
         print(f"[price_fetcher] ✅ 成功取得 {len(df)} 檔熱門股")
