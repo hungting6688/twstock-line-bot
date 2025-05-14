@@ -7,24 +7,35 @@ from io import StringIO
 from datetime import datetime
 
 def fetch_price_data(limit=100):
-    url = "https://www.twse.com.tw/zh/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"  # 即時成交資訊
-    response = requests.get(url)
-    content = response.text
+    print("[price_fetcher] ⏳ 擷取台股熱門股清單（來自 TWSE CSV）...")
 
-    lines = [line for line in content.split('\n') if line.count(',') > 10]
-    csv_data = '\n'.join(lines)
-    df = pd.read_csv(StringIO(csv_data))
+    url = "https://www.twse.com.tw/zh/page/trading/exchange/MI_INDEX.html"
+    today = datetime.today().strftime("%Y%m%d")
+    csv_url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={today}&type=ALL"
 
-    df = df.rename(columns=lambda x: x.strip())
-    df = df.rename(columns={"資訊代號": "證券代號", "資訊名稱": "證券名稱"})
+    try:
+        response = requests.get(csv_url, timeout=10)
+        response.encoding = "utf-8"
+        raw_text = response.text
 
-    df["證券代號"] = df["\u8b49\u5238\u4ee3\u865f"].astype(str)
-    df["\u8b49\u5238\u4ee3\u865f"] = df["\u8b49\u5238\u4ee3\u865f"].str.replace('=\"', '').str.replace('\"', '').str.strip()
+        # 過濾掉非數據列（通常是欄位列以上的文字或總計列）
+        lines = [line for line in raw_text.splitlines() if line.count('",') >= 10]
+        cleaned = "\n".join(lines)
+        df = pd.read_csv(StringIO(cleaned))
 
-    df = df[df["\u6210\u4ea4\u91d1\u984d"].apply(lambda x: str(x).replace(",", "").isdigit())]
-    df["\u6210\u4ea4\u91d1\u984d"] = df["\u6210\u4ea4\u91d1\u984d"].astype(str).str.replace(",", "").astype(float)
+        # 欄位重新命名（保險起見）
+        df.columns = [col.strip().replace('"', '') for col in df.columns]
 
-    df = df.sort_values("\u6210\u4ea4\u91d1\u984d", ascending=False)
-    df = df.head(limit).reset_index(drop=True)
+        # 過濾欄位並新增成交金額（單位：元）
+        df = df[["證券代號", "證券名稱", "成交股數", "成交金額", "收盤價"]].copy()
+        df = df.dropna(subset=["成交金額", "成交股數"])
 
-    return df
+        df["成交金額"] = df["成交金額"].astype(str).str.replace(",", "").astype(float) * 1000
+        df = df.sort_values("成交金額", ascending=False).head(limit).reset_index(drop=True)
+
+        print(f"[price_fetcher] ✅ 共取得 {len(df)} 檔熱門股")
+        return df
+
+    except Exception as e:
+        print(f"[price_fetcher] ❌ 擷取失敗：{str(e)}")
+        return pd.DataFrame()
