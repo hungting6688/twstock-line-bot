@@ -13,26 +13,31 @@ def get_market_sentiment_score():
     }
 
     today = datetime.today()
-    yesterday = today - timedelta(days=3)
+    start_date = today - timedelta(days=5)
 
     score = 0
     max_score = len(indices) * 2
 
-    for symbol in indices:
+    for symbol, name in indices.items():
         try:
-            df = yf.download(symbol, start=yesterday.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'))
-            if df.empty or len(df) < 2:
-                continue
-            pct_change = (df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]
+            df = yf.download(symbol, start=start_date.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'), progress=False)
+            closes = df["Close"].dropna()
+            if len(closes) < 2:
+                raise ValueError("資料不足")
+            last_close = float(closes.iloc[-1])
+            prev_close = float(closes.iloc[-2])
+            pct_change = (last_close - prev_close) / prev_close
+
             if pct_change > 0.01:
                 score += 2
             elif pct_change > 0:
                 score += 1
+
         except Exception as e:
             print(f"[market_sentiment] ❌ 無法讀取 {symbol}：{e}")
             continue
 
-    normalized_score = round((score / max_score) * 10, 1)  # 轉為 0~10 分數
+    normalized_score = round((score / max_score) * 10, 1)
     print(f"[market_sentiment] ✅ 市場情緒評分：{normalized_score}/10")
     return normalized_score
 
