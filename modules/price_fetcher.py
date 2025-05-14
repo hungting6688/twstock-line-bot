@@ -3,6 +3,7 @@
 import pandas as pd
 from io import StringIO
 import requests
+import re
 
 print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 
@@ -14,20 +15,20 @@ def fetch_price_data(limit=100):
 
     try:
         resp = requests.get(url, headers=headers, timeout=10)
-        content = resp.content.decode("big5", errors="ignore")  # ✅ 解決亂碼問題
-        raw_df = pd.read_csv(StringIO(content))
+        content = resp.content.decode("big5", errors="ignore")
 
-        # 過濾只保留上市股票清單（第5欄為數字者）
-        df = raw_df[raw_df.columns[:17]].dropna()
-        df.columns = df.columns.str.strip()
-        df = df[df[df.columns[5]].astype(str).str.replace(',', '').str.isnumeric()]
+        # 僅保留含「證券代號」開頭的主表資料行
+        clean_lines = "\n".join(
+            [line for line in content.splitlines() if re.match(r'^\d{4}', line)]
+        )
+        df = pd.read_csv(StringIO(clean_lines), header=None)
 
         df.columns = [
             '證券代號', '證券名稱', '成交股數', '成交筆數', '成交金額',
             '開盤價', '最高價', '最低價', '收盤價', '漲跌(+/-)',
             '漲跌價差', '最後揭示買價', '最後揭示買量', '最後揭示賣價',
-            '最後揭示賣量', '本益比', 'Unnamed: 16'
-        ]
+            '最後揭示賣量', '本益比'
+        ][:df.shape[1]]  # 自動對應欄位數
 
         df['成交金額'] = df['成交金額'].astype(str).str.replace(',', '', regex=False).astype(float)
         df = df.sort_values(by='成交金額', ascending=False).head(limit)
