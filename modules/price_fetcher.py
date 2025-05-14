@@ -13,45 +13,32 @@ def fetch_price_data(limit=100):
         response = requests.get(url, timeout=10)
         response.encoding = "big5"
         raw_text = response.text
+
+        # 找到開始於「證券代號」表格區段之後的內容
         lines = raw_text.split("\n")
-
-        # DEBUG：印出前 30 行觀察格式
-        print("[price_fetcher] 🧐 DEBUG：顯示前 30 行 TWSE 原始資料")
-        print("\n".join(lines[:30]))
-
-        # 放寬擷取條件：只要以四碼代碼開頭，且至少有 5 個逗號就保留
+        start = False
         content_lines = []
-        for line in lines:
-            if re.match(r'^\d{4}', line) and line.count(',') >= 5:
-                content_lines.append(line)
 
-        if not content_lines:
+        for line in lines:
+            if "證券代號" in line and "證券名稱" in line and "成交金額" in line:
+                start = True
+                content_lines.append(line)
+                continue
+            if start:
+                if re.match(r'^\d{4}', line):
+                    content_lines.append(line)
+                else:
+                    break  # 一旦不是股票代碼行，就結束擷取
+
+        if not content_lines or len(content_lines) <= 1:
             raise ValueError("無法從回傳內容中擷取有效表格（content_lines 為空）")
 
-        cleaned_csv = "\n".join(content_lines)
-        df = pd.read_csv(StringIO(cleaned_csv))
+        df = pd.read_csv(StringIO("\n".join(content_lines)))
         df.columns = df.columns.str.strip()
-        print(f"[price_fetcher] 取得欄位名稱：{df.columns.tolist()}")
+        print(f"[price_fetcher] ✅ 原始欄位：{df.columns.tolist()}")
 
-        # 嘗試辨識可能的欄位名稱變體
-        candidate_map = {
-            "證券代號": ["證券代號", "代號"],
-            "證券名稱": ["證券名稱", "名稱"],
-            "成交金額": ["成交金額", "成交金額(元)"]
-        }
-
-        final_cols = {}
-        for key, variants in candidate_map.items():
-            for var in variants:
-                if var in df.columns:
-                    final_cols[key] = var
-                    break
-            else:
-                raise ValueError(f"缺少欄位：{key}，實際欄位：{df.columns.tolist()}")
-
-        df = df[[final_cols["證券代號"], final_cols["證券名稱"], final_cols["成交金額"]]].copy()
+        df = df[["證券代號", "證券名稱", "成交金額"]].copy()
         df.columns = ["stock_id", "name", "成交金額"]
-
         df["成交金額"] = df["成交金額"].replace(",", "", regex=True).astype(float)
         df = df.sort_values("成交金額", ascending=False).head(limit)
         df.reset_index(drop=True, inplace=True)
