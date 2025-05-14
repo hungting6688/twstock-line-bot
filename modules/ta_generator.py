@@ -1,4 +1,4 @@
-print("[ta_generator] ✅ 已載入最新版 (技術指標計算)")
+print("[ta_generator] ✅ 已載入最新版 (修正 KD 錯誤)")
 
 import yfinance as yf
 import pandas as pd
@@ -25,9 +25,13 @@ def generate_technical_indicators(stock_ids):
             df["Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
 
             df["RSI"] = compute_rsi(df["Close"], 14)
-            df["Low_K"] = df["Low"].rolling(window=9).min()
-            df["High_K"] = df["High"].rolling(window=9).max()
-            df["K"] = 100 * (df["Close"] - df["Low_K"]) / (df["High_K"] - df["Low_K"])
+
+            # 修正 KD 這段邏輯：防止除以 0
+            low_min = df["Low"].rolling(window=9).min()
+            high_max = df["High"].rolling(window=9).max()
+            denom = (high_max - low_min).replace(0, 1)
+
+            df["K"] = 100 * (df["Close"] - low_min) / denom
             df["D"] = df["K"].rolling(window=3).mean()
 
             latest = df.iloc[-1]
