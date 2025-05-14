@@ -4,38 +4,27 @@ print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 import pandas as pd
 import requests
 from io import StringIO
+from datetime import datetime
 
-def fetch_price_data(limit=None):
-    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"
+def fetch_price_data(limit=100):
+    url = "https://www.twse.com.tw/zh/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"  # 即時成交資訊
+    response = requests.get(url)
+    content = response.text
 
-    try:
-        response = requests.get(url)
-        csv_text = response.text
-        lines = [line for line in csv_text.splitlines() if len(line.split('",')) > 10]
-        csv_cleaned = "\n".join(lines)
-        df = pd.read_csv(StringIO(csv_cleaned))
-    except Exception as e:
-        print(f"[price_fetcher] ❌ 無法下載或解析資料：{e}")
-        return pd.DataFrame()
+    lines = [line for line in content.split('\n') if line.count(',') > 10]
+    csv_data = '\n'.join(lines)
+    df = pd.read_csv(StringIO(csv_data))
 
-    # 清理欄位名稱與數據格式
-    df.columns = df.columns.str.strip()
-    df = df.rename(columns={
-        "證券代號": "證券代號",
-        "證券名稱": "證券名稱",
-        "成交股數": "成交股數",
-        "成交金額": "成交金額",
-    })
+    df = df.rename(columns=lambda x: x.strip())
+    df = df.rename(columns={"資訊代號": "證券代號", "資訊名稱": "證券名稱"})
 
-    for col in ["成交股數", "成交金額"]:
-        df[col] = df[col].astype(str).str.replace(",", "").str.replace("--", "0")
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    df["證券代號"] = df["\u8b49\u5238\u4ee3\u865f"].astype(str)
+    df["\u8b49\u5238\u4ee3\u865f"] = df["\u8b49\u5238\u4ee3\u865f"].str.replace('=\"', '').str.replace('\"', '').str.strip()
 
-    df["成交金額"] = df["成交金額"] * 1000  # 單位為千元
+    df = df[df["\u6210\u4ea4\u91d1\u984d"].apply(lambda x: str(x).replace(",", "").isdigit())]
+    df["\u6210\u4ea4\u91d1\u984d"] = df["\u6210\u4ea4\u91d1\u984d"].astype(str).str.replace(",", "").astype(float)
 
-    # 篩選每日成交金額前幾大的股票
-    df = df[df["成交金額"] > 0].sort_values("成交金額", ascending=False)
-    if limit:
-        df = df.head(limit)
+    df = df.sort_values("\u6210\u4ea4\u91d1\u984d", ascending=False)
+    df = df.head(limit).reset_index(drop=True)
 
-    return df.reset_index(drop=True)
+    return df
