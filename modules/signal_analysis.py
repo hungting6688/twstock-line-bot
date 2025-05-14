@@ -1,4 +1,3 @@
-# modules/signal_analysis.py
 print("[signal_analysis] ✅ 已載入最新版 (with get_top_stocks)")
 
 import pandas as pd
@@ -8,6 +7,7 @@ from modules.eps_dividend_scraper import fetch_eps_dividend_data
 from modules.fundamental_scraper import fetch_fundamental_data
 from modules.market_sentiment import get_market_sentiment_score
 from modules.strategy_profiles import strategy_profiles
+
 
 def analyze_stocks_with_signals(mode="default", **kwargs):
     print(f"[signal_analysis] ✅ 開始整合分析流程（策略：{mode}）...")
@@ -20,7 +20,16 @@ def analyze_stocks_with_signals(mode="default", **kwargs):
         return []
 
     stock_ids = stock_data["證券代號"].tolist()
-    ta_signals = generate_ta_signals(stock_ids)
+
+    # ✅ 修正：逐檔呼叫 generate_ta_signals
+    ta_signal_list = []
+    for sid in stock_ids:
+        signals = generate_ta_signals(sid)
+        if signals:
+            signals["證券代號"] = sid
+            ta_signal_list.append(signals)
+    ta_signals = pd.DataFrame(ta_signal_list)
+
     eps_data = fetch_eps_dividend_data(stock_ids)
     fundamental_data = fetch_fundamental_data(stock_ids)
 
