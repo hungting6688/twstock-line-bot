@@ -6,54 +6,72 @@ from modules.price_fetcher import fetch_price_data
 from modules.ta_generator import generate_ta_signals
 from modules.eps_dividend_scraper import fetch_eps_dividend_data
 from modules.fundamental_scraper import fetch_fundamental_data
-from modules.strategy_profiles import get_strategy_profile
+from modules.market_sentiment import get_market_sentiment_score
+from modules.strategy_profiles import strategy_profiles
 
-
-def analyze_stocks_with_signals(mode="default", limit=100, min_score=6, include_weak=True, **kwargs):
+def analyze_stocks_with_signals(mode="default", **kwargs):
     print(f"[signal_analysis] ✅ 開始整合分析流程（策略：{mode}）...")
+    profile = strategy_profiles.get(mode, strategy_profiles["default"])
+    profile.update(kwargs)
 
-    # 抓取熱門股
-    price_df = fetch_price_data(limit=limit)
-    stock_ids = price_df["證券代號"].tolist()
-
-    # 加入技術指標欄位
-    price_df = generate_ta_signals(price_df)
-
-    # 加入 EPS / 殖利率 / YTD
-    eps_df = fetch_eps_dividend_data(stock_ids[:20])  # 避免封鎖，限制20檔
-    merged = pd.merge(price_df, eps_df, on="證券代號", how="left")
-
-    # 加入法人 / 本益比等基本面
-    try:
-        fundamental_df = fetch_fundamental_data(stock_ids)
-        merged = pd.merge(merged, fundamental_df, on="證券代號", how="left")
-    except Exception as e:
-        print(f"[signal_analysis] ❌ 分析過程錯誤：{e}")
+    stock_data = fetch_price_data(limit=profile["limit"])
+    if stock_data.empty:
+        print("[signal_analysis] ❌ 無法取得股價資料")
         return []
 
-    # 載入該模式對應策略
-    strategy = get_strategy_profile(mode)
+    stock_ids = stock_data["證券代號"].tolist()
+    ta_signals = generate_ta_signals(stock_ids)
+    eps_data = fetch_eps_dividend_data(stock_ids)
+    fundamental_data = fetch_fundamental_data(stock_ids)
 
-    def score(row):
-        s = 0
-        for key, weight in strategy["weights"].items():
-            if key in row and pd.notna(row[key]):
-                if isinstance(row[key], (int, float, bool)):
-                    s += row[key] * weight
-        return round(s, 2)
+    merged = stock_data.merge(ta_signals, on="證券代號", how="left")
+    merged = merged.merge(eps_data, on="證券代號", how="left")
+    merged = merged.merge(fundamental_data, on="證券代號", how="left")
 
-    merged["推薦分數"] = merged.apply(score, axis=1)
-    merged = merged.sort_values("推薦分數", ascending=False)
+    weights = profile["weights"]
+    for key in weights:
+        merged[key] = merged[key].fillna(0)
+        merged[key] = merged[key].astype(float)
 
-    # 標記分類
-    def classify(row):
-        if row["推薦分數"] >= min_score:
-            return "✅ 推薦"
-        elif include_weak and row.get("rsi_strong") == 0 and row.get("kd_golden") == 0:
-            return "⚠️ 走弱"
-        else:
-            return "📌 觀察"
+    merged["score"] = sum(merged[key] * weight for key, weight in weights.items())
 
-    merged["分類"] = merged.apply(classify, axis=1)
+    sentiment_score = get_market_sentiment_score()
+    boost = sentiment_score * profile.get("sentiment_boost_weight", 0)
+    merged["score"] += boost
 
-    return merged
+    if profile.get("filter_type") == "small_cap":
+        merged = merged[merged["成交金額"] < 5e8]
+    elif profile.get("filter_type") == "large_cap":
+        merged = merged[merged["成交金額"] >= 5e8]
+
+    merged = merged.sort_values("score", ascending=False)
+
+    recommend = merged[merged["score"] >= profile["min_score"]].head(profile["max_recommend"])
+    fallback = merged.head(20)
+
+    result = []
+    seen = set()
+    for _, row in pd.concat([recommend, fallback]).iterrows():
+        sid = row["證券代號"]
+        if sid in seen:
+            continue
+        seen.add(sid)
+        label = "✅ 推薦" if row["score"] >= profile["min_score"] else "📌 觀察"
+        result.append({
+            "label": label,
+            "stock_id": sid,
+            "name": row["證券名稱"],
+            "score": round(row["score"], 1),
+        })
+
+    if profile.get("include_weak"):
+        weak = merged[merged["score"] <= 1].sort_values("score").head(2)
+        for _, row in weak.iterrows():
+            result.append({
+                "label": "⚠️ 走弱",
+                "stock_id": row["證券代號"],
+                "name": row["證券名稱"],
+                "score": round(row["score"], 1),
+            })
+
+    return result
