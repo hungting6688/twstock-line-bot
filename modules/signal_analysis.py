@@ -6,64 +6,74 @@ from modules.ta_generator import generate_ta_signals
 from modules.eps_dividend_scraper import fetch_eps_dividend_data
 from modules.fundamental_scraper import fetch_fundamental_data
 from modules.strategy_profiles import get_strategy_profile
-from modules.market_sentiment import get_market_sentiment_score
 
-def analyze_stocks_with_signals(mode="opening", include_weak=False, **kwargs):
-    print(f"[signal_analysis] ✅ 開始整合分析流程（策略：{mode}）...")
+def analyze_stocks_with_signals(mode="opening"):
+    strategy = get_strategy_profile(mode)
+    limit = strategy.get("limit", 100)
+    min_score = strategy.get("min_score", 7)
+    include_weak = strategy.get("include_weak", False)
+    weights = strategy.get("weights", {})
 
-    try:
-        strategy = get_strategy_profile(mode)
-        limit = strategy.get("limit", 100)
-        min_score = strategy.get("min_score", 7)
-        weight = strategy.get("weights", {})
-    except Exception as e:
-        print(f"[signal_analysis] ⚠️ 策略載入失敗：{e}")
-        return []
+    print(f"[signal_analysis] ⏳ 擷取熱門股前 {limit} 檔...")
+    price_df = fetch_price_data(limit=limit)
 
-    try:
-        df_price = fetch_price_data(limit=limit)
-        if df_price.empty:
-            raise ValueError("取得的股價資料無效")
-    except Exception as e:
-        print(f"[signal_analysis] ⚠️ 發生錯誤：{e}，將以空資料處理")
-        return []
+    if price_df.empty:
+        raise ValueError("取得的股價資料無效")
 
-    try:
-        df_ta = generate_ta_signals(df_price["stock_id"].tolist())
-        df_eps = fetch_eps_dividend_data(df_price["stock_id"].tolist())
-        df_fund = fetch_fundamental_data(df_price["stock_id"].tolist())
+    stock_ids = price_df["stock_id"].tolist()
 
-        # 合併所有資料
-        df = df_price.merge(df_ta, on="stock_id", how="left")
-        df = df.merge(df_eps, on="stock_id", how="left")
-        df = df.merge(df_fund, on="stock_id", how="left")
+    print("[signal_analysis] ⏳ 計算技術指標...")
+    ta_df = generate_ta_signals(stock_ids)
 
-        df["score"] = 0
+    print("[signal_analysis] ⏳ 擷取 EPS / 殖利率 / YTD 報酬率...")
+    eps_df = fetch_eps_dividend_data(stock_ids)
 
-        for col, w in weight.items():
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-                df["score"] += df[col] * w
+    print("[signal_analysis] ⏳ 擷取法人 / PE / ROE...")
+    fund_df = fetch_fundamental_data(stock_ids)
 
-        sentiment = get_market_sentiment_score()
-        df["score"] *= 1 + (sentiment - 5) / 20
+    # 合併所有資料
+    df = price_df.merge(ta_df, on="stock_id", how="left")
+    df = df.merge(eps_df, on="stock_id", how="left")
+    df = df.merge(fund_df, on="stock_id", how="left")
 
-        df["score"] = df["score"].round(1)
-        df["label"] = df["score"].apply(lambda s: "✅ 推薦" if s >= min_score else "")
-        df.loc[(df["score"] < min_score) & (include_weak), "label"] = "📌 觀察"
+    results = []
 
-        df_result = df[df["label"] != ""].sort_values("score", ascending=False)
+    for _, row in df.iterrows():
+        score = 0
+        reasons = []
 
-        # fallback：若無推薦，挑前幾名也列為觀察
-        if df_result.empty:
-            fallback_df = df.sort_values("score", ascending=False).head(5).copy()
-            fallback_df["label"] = "📌 觀察"
-            df_result = fallback_df
+        def add_score(key, condition=True, label=None):
+            w = weights.get(key, 0)
+            if pd.notna(row.get(key)) and condition:
+                nonlocal score
+                score += w
+                if label:
+                    reasons.append(label)
 
-        result = df_result[["stock_id", "name", "score", "label"]].to_dict("records")
-        print(f"[signal_analysis] ✅ 分析完成，共 {len(result)} 檔符合條件")
-        return result
+        add_score("MACD", row.get("MACD") == 1, "MACD黃金交叉")
+        add_score("KD", row.get("K", 0) > row.get("D", 100), "KD黃金交叉")
+        add_score("RSI", row.get("RSI", 0) > 50, "RSI走強")
+        add_score("MA", row.get("均線") == 1, "站上均線")
+        add_score("BB", row.get("布林通道") == 1, "布林通道偏多")
+        add_score("dividend", row.get("殖利率", 0) > 5, "高殖利率")
+        add_score("eps", row.get("EPS", 0) > 2, "EPS優異")
+        add_score("pe", row.get("本益比", 99) < 15, "本益比合理")
+        add_score("roe", row.get("ROE", 0) > 10, "ROE高")
 
-    except Exception as e:
-        print(f"[signal_analysis] ❌ 分析過程失敗：{e}")
-        return []
+        label = ""
+        if score >= min_score:
+            label = "✅ 推薦"
+        elif include_weak and score <= 1:
+            label = "⚠️ 走弱"
+        else:
+            label = "📌 觀察"
+
+        results.append({
+            "stock_id": row["stock_id"],
+            "name": row["name"],
+            "score": round(score, 1),
+            "label": label,
+            "reasons": "、".join(reasons),
+        })
+
+    return results
