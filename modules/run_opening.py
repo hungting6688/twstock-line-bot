@@ -1,5 +1,3 @@
-# modules/run_opening.py
-
 from modules.signal_analysis import analyze_stocks_with_signals
 from modules.line_bot import send_line_message
 from modules.strategy_profiles import get_strategy_profile
@@ -23,9 +21,9 @@ def analyze_opening():
         sentiment_info = get_market_sentiment() if strategy.get("apply_sentiment_adjustment", False) else None
         sentiment_note = f"📊 市場氣氛：{sentiment_info['note']}\n" if sentiment_info else ""
 
-        # 推播文字組裝
         lines = ["📈 今日開盤推薦結果：", sentiment_note]
 
+        # 主要推薦與觀察股推播
         for idx, row in df_result.iterrows():
             try:
                 label = str(row.get("label") or "📌")
@@ -42,6 +40,16 @@ def analyze_opening():
                 )
             except Exception as row_err:
                 print(f"[run_opening] ⚠️ 單列錯誤：{repr(row_err)} at row {idx}")
+
+        # 加入極弱股提示區塊（若有）
+        if "weak_signal" in df_result.columns:
+            weak_stocks = df_result[df_result["weak_signal"] >= 2]
+            if not weak_stocks.empty:
+                lines.append("⚠️ 近期極弱觀察股：")
+                for idx, row in weak_stocks.iterrows():
+                    lines.append(
+                        f"🚨 {row['stock_id']} {row['stock_name']}｜弱訊號數：{row['weak_signal']}"
+                    )
 
         message = "\n".join(lines)
         send_line_message(message)
