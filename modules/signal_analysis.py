@@ -2,7 +2,7 @@ print("[signal_analysis] ✅ 已載入最新版 (with get_top_stocks)")
 
 import pandas as pd
 from modules.price_fetcher import fetch_price_data
-from modules.ta_generator import generate_technical_indicators
+from modules.ta_generator import generate_ta_signals
 from modules.eps_dividend_scraper import fetch_eps_dividend_data
 from modules.fundamental_scraper import fetch_fundamental_data
 from modules.strategy_profiles import get_strategy_profile
@@ -22,7 +22,7 @@ def analyze_stocks_with_signals(mode="default", limit=100, min_score=7, include_
 
     try:
         stock_ids = price_df["stock_id"].tolist()
-        price_df = generate_technical_indicators(price_df)
+        ta_df = generate_ta_signals(stock_ids)
         eps_df = fetch_eps_dividend_data(stock_ids)
         fund_df = fetch_fundamental_data(stock_ids)
     except Exception as e:
@@ -31,7 +31,8 @@ def analyze_stocks_with_signals(mode="default", limit=100, min_score=7, include_
 
     # 合併所有資料
     try:
-        merged = price_df.merge(eps_df, on="stock_id", how="left")
+        merged = price_df.merge(ta_df, left_on="stock_id", right_on="證券代號", how="left")
+        merged = merged.merge(eps_df, on="stock_id", how="left")
         merged = merged.merge(fund_df, on="stock_id", how="left")
     except Exception as e:
         print(f"[signal_analysis] ❌ 資料合併失敗：{e}")
