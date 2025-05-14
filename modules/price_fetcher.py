@@ -3,6 +3,7 @@ print("[price_fetcher] ✅ 已載入最新版 (real-time 熱門股)")
 import pandas as pd
 import requests
 from io import StringIO
+import re
 
 def fetch_price_data(limit=100):
     print("[price_fetcher] ⏳ 擷取台股熱門股清單（來自 TWSE CSV）...")
