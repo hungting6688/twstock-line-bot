@@ -5,39 +5,40 @@ import pandas as pd
 from io import StringIO
 from datetime import datetime
 
-def fetch_price_data(limit=100):
+def fetch_price_data(limit=100, exclude_etf=True):
     print("[price_fetcher] ⏳ 擷取台股熱門股清單（來自 TWSE CSV）...")
     try:
-        url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={}&type=ALL".format(datetime.today().strftime("%Y%m%d"))
-        response = requests.get(url, timeout=10)
-        content = response.text
+        url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={}&type=ALL"
+        date_str = datetime.today().strftime("%Y%m%d")
+        full_url = url.format(date_str)
+        response = requests.get(full_url, timeout=10)
+        raw_text = response.text
 
-        # 移除開頭與非資料列
-        lines = [line for line in content.split('\n') if line.count(',') > 10]
-        csv_data = '\n'.join(lines)
-        df = pd.read_csv(StringIO(csv_data))
+        # 清理 CSV 資料：去除開頭非資料行
+        lines = raw_text.splitlines()
+        data_lines = [line for line in lines if line.count(",") > 10]
+        clean_csv = "\n".join(data_lines)
 
-        df = df.rename(columns={
-            df.columns[0]: "證券代號",
-            df.columns[1]: "證券名稱",
-            df.columns[2]: "成交股數",
-            df.columns[4]: "成交金額"
-        })
+        df = pd.read_csv(StringIO(clean_csv))
+        df = df.rename(columns=lambda x: x.strip())
 
-        # 處理逗號與無效值
-        df = df.dropna(subset=["證券代號", "成交金額"])
-        df["成交金額"] = df["成交金額"].astype(str).str.replace(",", "", regex=False)
-        df["成交金額"] = pd.to_numeric(df["成交金額"], errors="coerce")
+        df = df.rename(columns={"證券代號": "stock_id", "證券名稱": "name", "成交金額": "成交金額"})
+        df = df[["stock_id", "name", "成交金額"]].copy()
+
+        # 去除千分位與非數字
+        df["成交金額"] = pd.to_numeric(df["成交金額"].astype(str).str.replace(",", "", regex=False), errors='coerce')
         df = df.dropna(subset=["成交金額"])
 
-        # 排除 ETF（證券代號為非數字）
-        df = df[df["證券代號"].astype(str).str.isnumeric()]
+        # 排除 ETF 與下市股票
+        if exclude_etf:
+            df = df[~df["stock_id"].astype(str).str.startswith("00")]  # 粗略排除部分 ETF 以避免錯誤
+            df = df[~df["name"].astype(str).str.contains("ETF|基金|永續|債", na=False)]
 
-        # 篩選成交金額前 limit 檔
-        df = df.sort_values(by="成交金額", ascending=False).head(limit)
-        stock_ids = df["證券代號"].astype(str).tolist()
-        print(f"[price_fetcher] ✅ 擷取完成，共 {len(stock_ids)} 檔")
-        return stock_ids
+        df = df.sort_values("成交金額", ascending=False).head(limit)
+        df.reset_index(drop=True, inplace=True)
+
+        print(f"[price_fetcher] ✅ 成功擷取 {len(df)} 檔熱門股")
+        return df
 
     except Exception as e:
         print(f"[price_fetcher] ❌ 擷取失敗：{e}")
