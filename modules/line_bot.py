@@ -1,43 +1,37 @@
 # modules/line_bot.py
-
-import os
-import requests
-
 print("[line_bot] ✅ 已載入最新版")
 
-def send_line_message(message: str) -> bool:
-    """
-    發送文字訊息到指定 LINE USER，透過 LINE BOT 推播
-    需要事先在 GitHub Secrets 中設置：
-    - LINE_CHANNEL_ACCESS_TOKEN
-    - LINE_USER_ID
-    """
-    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-    user_id = os.getenv("LINE_USER_ID")
+import requests
+import os
 
-    if not token or not user_id:
-        print("[line_bot] ❌ 找不到 LINE Token 或 User ID，請確認 Secrets 設定")
-        return False
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_USER_ID = os.getenv("LINE_USER_ID")
 
-    url = "https://api.line.me/v2/bot/message/push"
+def send_line_bot_message(message: str):
+    if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_USER_ID:
+        print("[line_bot] ❌ 缺少 LINE Token 或 User ID，無法推播")
+        return
+
     headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}"
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
     }
-    body = {
-        "to": user_id,
-        "messages": [{"type": "text", "text": message}]
+
+    payload = {
+        "to": LINE_USER_ID,
+        "messages": [
+            {
+                "type": "text",
+                "text": message
+            }
+        ]
     }
 
     try:
-        res = requests.post(url, headers=headers, json=body)
-        if res.status_code == 200:
-            print("[line_bot] ✅ 訊息成功發送")
-            return True
+        response = requests.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload)
+        if response.status_code != 200:
+            print(f"[line_bot] ❌ 推播失敗：{response.status_code} - {response.text}")
         else:
-            print(f"[line_bot] ❌ 發送失敗，錯誤碼：{res.status_code}")
-            print(res.text)
-            return False
+            print("[line_bot] ✅ LINE 訊息推播成功")
     except Exception as e:
-        print(f"[line_bot] ❌ 發送過程出現錯誤：{e}")
-        return False
+        print(f"[line_bot] ❌ 推播過程發生錯誤：{e}")
