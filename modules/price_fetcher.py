@@ -5,55 +5,55 @@ import requests
 from io import StringIO
 import re
 
-def fetch_price_data(limit=100):
+def fetch_price_data(limit=None, mode="opening"):
     print("[price_fetcher] ⏳ 擷取台股熱門股清單（來自 TWSE CSV）...")
     url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=&type=ALL"
+
+    # 根據分析模式自動設定 limit
+    mode_limits = {
+        "opening": 100,
+        "intraday": 80,
+        "dividend": 60,
+        "closing": 300,
+    }
+    final_limit = limit or mode_limits.get(mode, 100)
 
     try:
         response = requests.get(url, timeout=10)
         response.encoding = "big5"
         raw_text = response.text
 
+        # 擷取有效股票資料行（開頭為 4 碼數字，且含逗號數 >10）
         lines = raw_text.split("\n")
         content_lines = []
-        start_capture = False
-
         for line in lines:
-            # 開始擷取的條件是含「證券代號」且下一行開頭是 4 碼數字（股票代碼）
-            if not start_capture and "證券代號" in line and "證券名稱" in line:
-                start_capture = True
+            if re.match(r'^"\\d{4}"', line) and line.count(",") > 10:
                 content_lines.append(line)
-                continue
-            if start_capture:
-                if re.match(r'^"\d{4}"', line):  # 股票代碼開頭
-                    content_lines.append(line)
-                else:
-                    break  # 一旦非股票資料，就停止擷取
 
-        if not content_lines or len(content_lines) < 2:
+        if not content_lines:
             raise ValueError("無法從回傳內容中擷取有效表格（content_lines 為空）")
 
         cleaned_csv = "\n".join(content_lines)
-        df = pd.read_csv(StringIO(cleaned_csv))
-        df.columns = df.columns.str.strip()
+        df = pd.read_csv(StringIO(cleaned_csv), header=None)
 
-        # 自動對應欄位名稱
-        col_id = next((c for c in df.columns if "證券代號" in c), None)
-        col_name = next((c for c in df.columns if "證券名稱" in c), None)
-        col_value = next((c for c in df.columns if "成交金額" in c), None)
+        df.columns = [
+            "證券代號", "證券名稱", "成交股數", "成交金額", "成交筆數",
+            "開盤價", "最高價", "最低價", "收盤價", "漲跌(+/-)",
+            "漲跌價差", "最後揭示買價", "最後揭示買量", "最後揭示賣價",
+            "最後揭示賣量", "本益比"
+        ]
 
-        if not all([col_id, col_name, col_value]):
-            raise ValueError(f"缺少必要欄位，實際欄位為：{df.columns.tolist()}")
-
-        df = df[[col_id, col_name, col_value]].copy()
+        df = df[["證券代號", "證券名稱", "成交金額"]].copy()
         df.columns = ["stock_id", "name", "成交金額"]
 
-        df["成交金額"] = pd.to_numeric(df["成交金額"].astype(str).str.replace(",", ""), errors="coerce")
-        df = df.dropna(subset=["成交金額"])
-        df = df.sort_values("成交金額", ascending=False).head(limit)
+        df["成交金額"] = df["成交金額"].replace(",", "", regex=True)
+        df = df[pd.to_numeric(df["成交金額"], errors="coerce").notna()]  # 移除不能轉換為數字的資料（如指數）
+        df["成交金額"] = df["成交金額"].astype(float)
+
+        df = df.sort_values("成交金額", ascending=False).head(final_limit)
         df.reset_index(drop=True, inplace=True)
 
-        print(f"[price_fetcher] ✅ 成功取得 {len(df)} 檔熱門股")
+        print(f"[price_fetcher] ✅ 成功取得 {len(df)} 檔熱門股（模式：{mode}，limit={final_limit}）")
         return df
 
     except Exception as e:
