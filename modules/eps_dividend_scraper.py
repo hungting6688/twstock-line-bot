@@ -14,15 +14,15 @@ def fetch_eps_dividend_data(stock_ids, limit=20):
         try:
             url = f'https://mops.twse.com.tw/mops/web/ajax_t05st09?encodeURIComponent=1&step=1&firstin=1&off=1&keyword4={stock_id}'
             headers = { "User-Agent": "Mozilla/5.0" }
-            resp = requests.get(url, headers=headers, timeout=10)  # 加 timeout 避免卡住
+            resp = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(resp.text, "html.parser")
             tables = soup.find_all("table")
 
-            eps_growth = False
+            eps_growth = 0  # 0 表示沒成長，1 表示成長
             dividend_yield = 0.0
             ytd_return = 0.0
 
-            # 嘗試擷取 EPS 資料
+            # 擷取 EPS 資料
             if len(tables) >= 2:
                 rows = tables[1].find_all("tr")
                 eps_values = []
@@ -35,17 +35,17 @@ def fetch_eps_dividend_data(stock_ids, limit=20):
                         except:
                             continue
                 if len(eps_values) >= 2 and eps_values[-1] > eps_values[-2]:
-                    eps_growth = True
+                    eps_growth = 1
 
-            # 模擬殖利率與 YTD（未來可接正式資料）
+            # 模擬殖利率與 YTD（保留可替換結構）
             dividend_yield = round(2 + (int(stock_id[-1]) % 3), 2)
             ytd_return = round((int(stock_id[-2:]) % 20 - 10) / 10, 2)
 
             result.append({
-                "stock_id": stock_id,
-                "eps_growth": eps_growth,
-                "dividend_yield": dividend_yield,
-                "ytd_return": ytd_return
+                "證券代號": stock_id,
+                "EPS_YOY": eps_growth,
+                "殖利率": dividend_yield,
+                "YTD報酬率": ytd_return
             })
 
         except Exception as e:
