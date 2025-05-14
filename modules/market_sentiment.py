@@ -1,4 +1,3 @@
-# modules/market_sentiment.py
 print("[market_sentiment] ✅ 已載入最新版")
 
 import yfinance as yf
@@ -36,3 +35,43 @@ def get_market_sentiment_score():
     normalized_score = round((score / max_score) * 10, 1)  # 轉為 0~10 分數
     print(f"[market_sentiment] ✅ 市場情緒評分：{normalized_score}/10")
     return normalized_score
+
+def get_market_sentiment_adjustments():
+    score = get_market_sentiment_score()
+
+    if score >= 8:
+        return {
+            "MACD": 1.2,
+            "KD": 1.2,
+            "RSI": 1.1,
+            "MA": 1.2,
+            "BB": 1.1,
+            "dividend": 1.0,
+            "eps": 1.0,
+            "pe": 0.9,
+            "roe": 0.9,
+        }
+    elif score >= 5:
+        return {
+            "MACD": 1.0,
+            "KD": 1.0,
+            "RSI": 1.0,
+            "MA": 1.0,
+            "BB": 1.0,
+            "dividend": 1.0,
+            "eps": 1.0,
+            "pe": 1.0,
+            "roe": 1.0,
+        }
+    else:
+        return {
+            "MACD": 0.8,
+            "KD": 0.9,
+            "RSI": 0.9,
+            "MA": 0.8,
+            "BB": 0.9,
+            "dividend": 1.2,
+            "eps": 1.2,
+            "pe": 1.1,
+            "roe": 1.1,
+        }
