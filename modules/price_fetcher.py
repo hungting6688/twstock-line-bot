@@ -6,7 +6,7 @@ import csv
 from io import StringIO
 from datetime import datetime
 
-def fetch_price_data(limit=100):
+def fetch_price_data(limit=100, log_path="fetch_price_log.txt"):
     print("[price_fetcher] ⏳ 擷取台股熱門股清單（來自 TWSE CSV）...")
 
     today = datetime.now().strftime("%Y%m%d")
@@ -43,5 +43,8 @@ def fetch_price_data(limit=100):
         return df
 
     except Exception as e:
-        print(f"[price_fetcher] ❌ 擷取失敗：{e}")
+        error_msg = f"[price_fetcher] ❌ 擷取失敗：{e}"
+        print(error_msg)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat()} - {error_msg}\n")
         return pd.DataFrame()
