@@ -1,106 +1,86 @@
 print("[signal_analysis] ✅ 已載入最新版 (with get_top_stocks)")
 
-import pandas as pd
 from modules.price_fetcher import fetch_price_data
 from modules.ta_generator import generate_ta_signals
 from modules.eps_dividend_scraper import fetch_eps_dividend_data
 from modules.fundamental_scraper import fetch_fundamental_data
-from modules.market_sentiment import get_market_sentiment_score
-from modules.strategy_profiles import strategy_profiles
+from modules.strategy_profiles import get_strategy_profile
+from modules.market_sentiment import get_market_sentiment_adjustments
 
-def analyze_stocks_with_signals(strategy_name="default", **kwargs):
-    print(f"[signal_analysis] ✅ 開始整合分析流程（策略：{strategy_name}）...")
-    profile = strategy_profiles.get(strategy_name, strategy_profiles["default"])
-    profile.update(kwargs)
+import pandas as pd
 
-    stock_data = fetch_price_data(limit=profile.get("limit", 100))
-    if stock_data.empty:
-        print("[signal_analysis] ❌ 無法取得股價資料")
-        return []
+def analyze_stocks_with_signals(mode="opening", **kwargs):
+    print(f"[signal_analysis] ✅ 開始整合分析流程（策略：{mode}）...")
+    try:
+        strategy = get_strategy_profile(mode)
+        limit = kwargs.get("limit", strategy.get("limit", 100))
+        min_score = kwargs.get("min_score", strategy.get("min_score", 7))
+        include_weak = kwargs.get("include_weak", strategy.get("include_weak", False))
 
-    stock_ids = stock_data["證券代號"].tolist()
-    ta_signals = generate_ta_signals(stock_ids)
-    eps_data = fetch_eps_dividend_data(stock_ids, limit=profile.get("limit", 100))
-    fundamental_data = fetch_fundamental_data(stock_ids)
+        price_df = fetch_price_data(limit=limit)
+        if price_df is None or price_df.empty:
+            print("[signal_analysis] ❌ 無法取得股價資料")
+            return None
 
-    df = stock_data.merge(ta_signals, on="證券代號", how="left")
-    df = df.merge(eps_data, on="證券代號", how="left")
-    df = df.merge(fundamental_data, on="證券代號", how="left")
+        stock_ids = price_df["證券代號"].astype(str).tolist()
+        ta_df = generate_ta_signals(stock_ids)
+        eps_df = fetch_eps_dividend_data(stock_ids, max_count=limit)
+        fund_df = fetch_fundamental_data(stock_ids)
+        sentiment_weights = get_market_sentiment_adjustments()
 
-    weights = profile["weights"]
-    for key in weights:
-        df[key] = pd.to_numeric(df.get(key, 0), errors="coerce").fillna(0)
+        df = price_df.merge(ta_df, on="證券代號", how="left")
+        df = df.merge(eps_df, on="證券代號", how="left")
+        df = df.merge(fund_df, on="證券代號", how="left")
 
-    df["score"] = sum(df[key] * weight for key, weight in weights.items())
+        scored = []
+        for _, row in df.iterrows():
+            score = 0
+            reasons = []
 
-    # 市場情緒加權
-    sentiment_score = get_market_sentiment_score()
-    df["score"] += sentiment_score * profile.get("sentiment_boost_weight", 0)
+            def add_score(cond, pts, desc):
+                nonlocal score
+                if cond:
+                    score += pts
+                    reasons.append(desc)
 
-    # 小型股 or 大型股條件篩選
-    if profile.get("filter_type") == "small_cap":
-        df = df[df["成交金額"] < 5e8]
-    elif profile.get("filter_type") == "large_cap":
-        df = df[df["成交金額"] >= 5e8]
+            add_score(row.get("MACD", 0) == 1, strategy["weights"].get("MACD", 1), "MACD 黃金交叉")
+            add_score(row.get("K", 0) > row.get("D", 0), strategy["weights"].get("KD", 1), "KD 黃金交叉")
+            add_score(row.get("RSI", 0) >= 50, strategy["weights"].get("RSI", 1), "RSI 強勢")
+            add_score(row.get("均線", 0) == 1, strategy["weights"].get("MA", 1), "短期均線偏多")
+            add_score(row.get("布林通道", 0) == 1, strategy["weights"].get("BB", 1), "布林通道突破")
 
-    df = df.sort_values("score", ascending=False)
+            add_score(row.get("殖利率", 0) >= 5, strategy["weights"].get("dividend", 1), "高殖利率")
+            add_score(row.get("EPS", 0) >= 5, strategy["weights"].get("eps", 1), "EPS 穩健")
+            add_score(row.get("PE", 999) <= 15, strategy["weights"].get("pe", 1), "本益比合理")
+            add_score(row.get("ROE", 0) >= 10, strategy["weights"].get("roe", 1), "ROE 佳")
 
-    recommended = df[df["score"] >= profile["min_score"]].head(profile["max_recommend"])
-    fallback = df.head(profile.get("fallback_count", 20))
+            # 加入市場情緒調整權重
+            score *= sentiment_weights.get("adjust", 1.0)
 
-    result = []
+            label = "✅ 推薦" if score >= min_score else "📌 觀察"
+            if include_weak and row.get("RSI", 0) < 30:
+                label = "⚠️ 走弱"
 
-    seen = set()
-    for _, row in pd.concat([recommended, fallback]).iterrows():
-        sid = row["證券代號"]
-        if sid in seen:
-            continue
-        seen.add(sid)
+            name = row.get("證券名稱", "")
+            scored.append({
+                "stock_id": row["證券代號"],
+                "name": name,
+                "score": round(score, 2),
+                "label": label,
+                "reasons": "、".join(reasons)
+            })
 
-        label = "📌 觀察"
-        if row["score"] >= profile["min_score"]:
-            label = "✅ 推薦"
-        elif profile.get("include_weak") and row["score"] <= 1:
-            label = "⚠️ 走弱"
+        scored = sorted(scored, key=lambda x: x["score"], reverse=True)
+        top_recommend = [s for s in scored if s["label"] == "✅ 推薦"][:8]
 
-        result.append({
-            "stock_id": sid,
-            "name": row["證券名稱"],
-            "score": round(row["score"], 1),
-            "reason": explain_reasons(row, weights),
-            "suggestion": get_suggestion(row["score"]),
-            "label": label
-        })
+        if not top_recommend:
+            fallback = scored[:3]
+            for f in fallback:
+                f["label"] = "📌 觀察"
+            return fallback
 
-    return result
+        return top_recommend + [s for s in scored if s["label"] != "✅ 推薦"][:3]
 
-def explain_reasons(row, weights):
-    reasons = []
-    if "MACD" in weights and row["MACD"] > 0:
-        reasons.append("MACD 黃金交叉")
-    if "K" in weights and row["K"] > row["D"]:
-        reasons.append("KD 黃金交叉")
-    if "RSI" in weights and row["RSI"] > 50:
-        reasons.append("RSI 走強")
-    if "均線" in weights and row["均線"] > 0:
-        reasons.append("站上均線")
-    if "布林通道" in weights and row["布林通道"] > 0:
-        reasons.append("布林通道偏多")
-    if "殖利率" in weights and row.get("殖利率", 0) > 4:
-        reasons.append("高殖利率")
-    if "EPS_YOY" in weights and row.get("EPS_YOY", 0) > 0:
-        reasons.append("EPS 成長")
-    if "buy_total" in weights and row.get("buy_total", 0) > 0:
-        reasons.append("法人買超")
-
-    return "、".join(reasons) if reasons else "綜合表現"
-
-def get_suggestion(score):
-    if score >= 9:
-        return "建議立即列入關注清單"
-    elif score >= 7:
-        return "建議密切觀察"
-    elif score >= 5:
-        return "建議暫不進場"
-    else:
-        return "不建議操作"
+    except Exception as e:
+        print(f"[signal_analysis] ❌ 分析失敗：{e}")
+        return None
