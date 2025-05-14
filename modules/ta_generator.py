@@ -1,8 +1,14 @@
-print("[ta_generator] ✅ 已載入最新版（加速與清洗修正）")
+print("[ta_generator] ✅ 已載入最新版（含 safe_last 修正）")
 
 import yfinance as yf
 import pandas as pd
 from tqdm import tqdm
+
+def safe_last(series):
+    try:
+        return float(series.iloc[-1])
+    except Exception:
+        return None
 
 def generate_ta_signals(stock_ids):
     print("[ta_generator] ⏳ 開始計算技術指標...")
@@ -12,6 +18,7 @@ def generate_ta_signals(stock_ids):
         try:
             clean_id = str(stock_id).replace("=\"", "").replace("\"", "").strip()
             df = yf.download(f"{clean_id}.TW", period="60d", progress=False)
+
             if df.empty or len(df) < 30:
                 continue
             df = df.dropna().copy()
@@ -22,9 +29,7 @@ def generate_ta_signals(stock_ids):
             df["EMA26"] = df["Close"].ewm(span=26).mean()
             df["MACD"] = df["EMA12"] - df["EMA26"]
             df["Signal"] = df["MACD"].ewm(span=9).mean()
-            macd_signal = 0
-            if not df["MACD"].isna().all() and not df["Signal"].isna().all():
-                macd_signal = int(df["MACD"].iloc[-1] > df["Signal"].iloc[-1])
+            macd_signal = int(safe_last(df["MACD"]) > safe_last(df["Signal"]))
 
             # KD
             low_min = df["Low"].rolling(window=9).min()
@@ -32,8 +37,8 @@ def generate_ta_signals(stock_ids):
             rsv = (df["Close"] - low_min) / (high_max - low_min) * 100
             df["K"] = rsv.ewm(com=2).mean()
             df["D"] = df["K"].ewm(com=2).mean()
-            k = float(df["K"].iloc[-1]) if not df["K"].isna().all() else 0
-            d = float(df["D"].iloc[-1]) if not df["D"].isna().all() else 0
+            k = safe_last(df["K"]) or 0
+            d = safe_last(df["D"]) or 0
 
             # RSI
             delta = df["Close"].diff()
@@ -43,22 +48,18 @@ def generate_ta_signals(stock_ids):
             avg_loss = loss.rolling(window=14).mean()
             rs = avg_gain / avg_loss
             rsi = 100 - (100 / (1 + rs))
-            rsi_val = float(rsi.iloc[-1]) if not rsi.isna().all() else 0
+            rsi_val = safe_last(rsi) or 0
 
             # 均線
             ma5 = df["Close"].rolling(window=5).mean()
             ma20 = df["Close"].rolling(window=20).mean()
-            ma_score = 0
-            if not ma5.isna().all() and not ma20.isna().all():
-                ma_score = int(ma5.iloc[-1] > ma20.iloc[-1])
+            ma_score = int((safe_last(ma5) or 0) > (safe_last(ma20) or 0))
 
             # 布林通道
             mavg = df["Close"].rolling(window=20).mean()
             std = df["Close"].rolling(window=20).std()
             upper = mavg + 2 * std
-            bb_signal = 0
-            if not upper.isna().all():
-                bb_signal = int(df["Close"].iloc[-1] > upper.iloc[-1])
+            bb_signal = int((safe_last(df["Close"]) or 0) > (safe_last(upper) or 0))
 
             results.append({
                 "證券代號": clean_id,
