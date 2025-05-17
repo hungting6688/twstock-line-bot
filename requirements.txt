@@ -5,3 +5,9 @@ numpy
 yfinance
 requests
 tqdm
+beautifulsoup4
+schedule
+twstock
+gspread
+line-bot-sdk
+python-dotenv
