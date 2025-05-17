@@ -14,7 +14,7 @@ from datetime import datetime
 import yfinance as yf
 
 from modules.multi_analysis import analyze_stock_value
-from modules.ta_analysis import analyze_technical_indicators
+from modules.analysis.technical import analyze_technical_indicators
 from modules.price_fetcher import get_top_stocks
 from modules.twse_scraper import get_all_valid_twse_stocks
 from modules.eps_dividend_scraper import get_eps_data, get_dividend_data
