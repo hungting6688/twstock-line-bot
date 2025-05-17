@@ -9,10 +9,16 @@ from modules.run_opening import analyze_opening
 from modules.intraday_monitor import analyze_intraday
 from modules.dividend import analyze_dividend
 from modules.closing_summary import analyze_closing
-from modules.line_bot import send_line_bot_message
+from modules.notification.line_bot import send_line_bot_message
 
 # 引入新功能模組
-from modules.stock_recommender import get_stock_recommendations, get_weak_valley_alerts, send_recommendations_to_user, send_weak_valley_alerts_to_user
+# 更新導入路徑
+from modules.analysis.recommender import (
+    get_stock_recommendations, 
+    get_weak_valley_alerts, 
+    send_recommendations_to_user, 
+    send_weak_valley_alerts_to_user
+)
 
 # 檢查命令行參數
 parser = argparse.ArgumentParser(description='twstock-line-bot')
