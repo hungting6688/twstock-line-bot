@@ -1,74 +1,91 @@
-# app.py 中添加
+#!/usr/bin/env python3
+import os
+import sys
+import argparse
 import schedule
 import time
 import threading
 from datetime import datetime
 
+# 引入現有功能模組
+from modules.run_opening import analyze_opening
+from modules.intraday_monitor import analyze_intraday
+from modules.dividend import analyze_dividend
+from modules.closing_summary import analyze_closing
+from modules.line_bot import send_line_bot_message
+
 # 引入新功能模組
-from modules.stock_recommender import get_stock_recommendations, get_weak_valley_alerts
+from modules.stock_recommender import get_stock_recommendations, get_weak_valley_alerts, send_recommendations_to_user, send_weak_valley_alerts_to_user
 from modules.multi_analysis import analyze_stock_value
+
+# 檢查命令行參數
+parser = argparse.ArgumentParser(description='twstock-line-bot')
+parser.add_argument('--mode', type=str, choices=['opening', 'intraday', 'dividend', 'closing', 'morning', 'noon', 'afternoon', 'evening'], help='指定執行模式')
+args = parser.parse_args()
 
 # 定義四個時段的推播功能
 def morning_push():
     """早盤前推播 (9:00)"""
-    stocks = get_stock_recommendations('morning')
-    weak_valleys = get_weak_valley_alerts()
-    
-    # 推播給所有訂閱用戶
-    user_ids = get_all_subscribed_users()
-    for user_id in user_ids:
-        send_recommendations(user_id, stocks, time_slot="早盤前")
-        if weak_valleys:
-            send_weak_valley_alerts(user_id, weak_valleys)
+    print("[main] ⏳ 執行早盤前推播...")
+    try:
+        stocks = get_stock_recommendations('morning')
+        weak_valleys = get_weak_valley_alerts()
+        
+        # 使用 LINE_USER_ID 作為推播對象
+        user_id = os.getenv("LINE_USER_ID")
+        if user_id:
+            send_recommendations_to_user(user_id, stocks, "早盤前")
+            if weak_valleys:
+                send_weak_valley_alerts_to_user(user_id, weak_valleys)
+        else:
+            print("[main] ⚠️ 未設定 LINE_USER_ID，無法推播")
+    except Exception as e:
+        print(f"[main] ❌ 早盤前推播失敗：{e}")
 
 def noon_push():
     """中午休盤推播 (12:30)"""
-    stocks = get_stock_recommendations('noon')
-    user_ids = get_all_subscribed_users()
-    for user_id in user_ids:
-        send_recommendations(user_id, stocks, time_slot="中午休盤時")
+    print("[main] ⏳ 執行中午休盤推播...")
+    try:
+        stocks = get_stock_recommendations('noon')
+        
+        # 使用 LINE_USER_ID 作為推播對象
+        user_id = os.getenv("LINE_USER_ID")
+        if user_id:
+            send_recommendations_to_user(user_id, stocks, "中午休盤時")
+        else:
+            print("[main] ⚠️ 未設定 LINE_USER_ID，無法推播")
+    except Exception as e:
+        print(f"[main] ❌ 中午休盤推播失敗：{e}")
 
 def afternoon_push():
     """尾盤前推播 (13:00)"""
-    stocks = get_stock_recommendations('afternoon')
-    user_ids = get_all_subscribed_users()
-    for user_id in user_ids:
-        send_recommendations(user_id, stocks, time_slot="尾盤前")
+    print("[main] ⏳ 執行尾盤前推播...")
+    try:
+        stocks = get_stock_recommendations('afternoon')
+        
+        # 使用 LINE_USER_ID 作為推播對象
+        user_id = os.getenv("LINE_USER_ID")
+        if user_id:
+            send_recommendations_to_user(user_id, stocks, "尾盤前")
+        else:
+            print("[main] ⚠️ 未設定 LINE_USER_ID，無法推播")
+    except Exception as e:
+        print(f"[main] ❌ 尾盤前推播失敗：{e}")
 
 def evening_push():
     """盤後分析推播 (15:00)"""
-    stocks = get_stock_recommendations('evening')
-    user_ids = get_all_subscribed_users()
-    for user_id in user_ids:
-        send_recommendations(user_id, stocks, time_slot="盤後分析")
-
-def get_all_subscribed_users():
-    """獲取所有訂閱推播的用戶 ID"""
-    # 從資料庫獲取訂閱用戶
-    # 這裡需要實現資料庫相關的代碼
-    # 示例：
-    return db.query("SELECT user_id FROM subscriptions WHERE is_active = TRUE")
-
-def send_recommendations(user_id, stocks, time_slot):
-    """發送股票推薦訊息"""
-    message = f"【{time_slot}推薦股票】\n\n"
-    for stock in stocks:
-        message += f"📈 {stock['code']} {stock['name']}\n"
-        message += f"推薦理由: {stock['reason']}\n"
-        message += f"目標價: {stock['target_price']}\n"
-        message += f"止損價: {stock['stop_loss']}\n\n"
-    
-    line_bot_api.push_message(user_id, TextSendMessage(text=message))
-
-def send_weak_valley_alerts(user_id, weak_valleys):
-    """發送極弱谷提醒"""
-    message = "【極弱谷警報】\n\n"
-    for stock in weak_valleys:
-        message += f"⚠️ {stock['code']} {stock['name']}\n"
-        message += f"當前價格: {stock['current_price']}\n"
-        message += f"警報原因: {stock['alert_reason']}\n\n"
-    
-    line_bot_api.push_message(user_id, TextSendMessage(text=message))
+    print("[main] ⏳ 執行盤後分析推播...")
+    try:
+        stocks = get_stock_recommendations('evening')
+        
+        # 使用 LINE_USER_ID 作為推播對象
+        user_id = os.getenv("LINE_USER_ID")
+        if user_id:
+            send_recommendations_to_user(user_id, stocks, "盤後分析")
+        else:
+            print("[main] ⚠️ 未設定 LINE_USER_ID，無法推播")
+    except Exception as e:
+        print(f"[main] ❌ 盤後分析推播失敗：{e}")
 
 # 設置排程任務
 def setup_schedule():
@@ -110,11 +127,41 @@ def get_taiwan_stock_holidays():
 # 在單獨的線程中運行排程器
 def run_scheduler():
     setup_schedule()
+    print("[main] ✅ 排程器已啟動")
     while True:
         schedule.run_pending()
         time.sleep(60)  # 每分鐘檢查一次排程
 
-# 在主程式啟動時開始排程器
+# 根據命令行參數執行相應功能
+if args.mode:
+    if args.mode == 'opening':
+        analyze_opening()
+    elif args.mode == 'intraday':
+        analyze_intraday()
+    elif args.mode == 'dividend':
+        analyze_dividend()
+    elif args.mode == 'closing':
+        analyze_closing()
+    elif args.mode == 'morning':
+        morning_push()
+    elif args.mode == 'noon':
+        noon_push()
+    elif args.mode == 'afternoon':
+        afternoon_push()
+    elif args.mode == 'evening':
+        evening_push()
+    sys.exit(0)
+
+# 如果沒有指定模式，啟動排程器
+print("[main] 啟動排程服務...")
 scheduler_thread = threading.Thread(target=run_scheduler)
 scheduler_thread.daemon = True
 scheduler_thread.start()
+
+# 維持主線程運行，避免程序退出
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("[main] 程序被用戶中斷")
+    sys.exit(0)
