@@ -1,0 +1,169 @@
+name: 財報數據測試
+
+on:
+  workflow_dispatch:  # 允許手動觸發
+
+jobs:
+  test-financial-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Create test script
+        run: |
+          cat > test_financial.py << 'EOF'
+#!/usr/bin/env python3
+"""
+財報讀取測試腳本
+用於測試是否可以成功獲取股票財報數據
+"""
+
+import sys
+import pandas as pd
+from datetime import datetime
+
+# 引入需要測試的模組
+from modules.data.scraper import get_eps_data, get_dividend_data, get_all_valid_twse_stocks
+from modules.data.fetcher import get_top_stocks
+
+def test_fetch_eps_data():
+    """測試獲取 EPS 數據"""
+    print("\n[測試] 開始獲取 EPS 數據...")
+    try:
+        eps_data = get_eps_data()
+        if not eps_data:
+            print("[測試] ❌ 無法獲取 EPS 數據")
+            return False
+        
+        # 顯示前 5 筆資料
+        count = 0
+        print("[測試] 前 5 筆 EPS 數據:")
+        for stock_id, data in eps_data.items():
+            print(f"  股票代號: {stock_id}, EPS: {data.get('eps')}, 股息: {data.get('dividend')}")
+            count += 1
+            if count >= 5:
+                break
+        
+        print(f"[測試] ✅ 成功獲取 EPS 數據，共 {len(eps_data)} 檔股票")
+        return True
+    except Exception as e:
+        print(f"[測試] ❌ 獲取 EPS 數據失敗: {e}")
+        return False
+
+def test_fetch_dividend_data():
+    """測試獲取股息數據"""
+    print("\n[測試] 開始獲取股息數據...")
+    try:
+        dividend_data = get_dividend_data()
+        if not dividend_data:
+            print("[測試] ❌ 無法獲取股息數據")
+            return False
+        
+        # 顯示前 5 筆資料
+        count = 0
+        print("[測試] 前 5 筆股息數據:")
+        for stock_id, dividend in dividend_data.items():
+            print(f"  股票代號: {stock_id}, 股息: {dividend}")
+            count += 1
+            if count >= 5:
+                break
+        
+        print(f"[測試] ✅ 成功獲取股息數據，共 {len(dividend_data)} 檔股票")
+        return True
+    except Exception as e:
+        print(f"[測試] ❌ 獲取股息數據失敗: {e}")
+        return False
+
+def test_fetch_stock_list():
+    """測試獲取股票列表"""
+    print("\n[測試] 開始獲取上市股票列表...")
+    try:
+        stock_list = get_all_valid_twse_stocks()
+        if not stock_list:
+            print("[測試] ❌ 無法獲取股票列表")
+            return False
+        
+        # 顯示前 5 筆資料
+        print("[測試] 前 5 筆股票資料:")
+        for i, stock in enumerate(stock_list[:5]):
+            print(f"  股票代號: {stock['stock_id']}, 名稱: {stock['stock_name']}, 產業: {stock['industry']}")
+        
+        print(f"[測試] ✅ 成功獲取股票列表，共 {len(stock_list)} 檔股票")
+        return True
+    except Exception as e:
+        print(f"[測試] ❌ 獲取股票列表失敗: {e}")
+        return False
+
+def test_fetch_top_stocks():
+    """測試獲取熱門股票"""
+    print("\n[測試] 開始獲取熱門股票...")
+    try:
+        top_stocks = get_top_stocks(limit=20)
+        if not top_stocks:
+            print("[測試] ❌ 無法獲取熱門股票")
+            return False
+        
+        # 顯示結果
+        print("[測試] 熱門股票:")
+        for i, stock_id in enumerate(top_stocks):
+            print(f"  {i+1}. {stock_id}")
+        
+        print(f"[測試] ✅ 成功獲取熱門股票，共 {len(top_stocks)} 檔")
+        return True
+    except Exception as e:
+        print(f"[測試] ❌ 獲取熱門股票失敗: {e}")
+        return False
+
+def run_all_tests():
+    """執行所有測試"""
+    print("=" * 50)
+    print(f"財報數據讀取測試開始 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 50)
+    
+    # 測試項目與結果
+    tests = [
+        ("股票列表測試", test_fetch_stock_list),
+        ("熱門股票測試", test_fetch_top_stocks),
+        ("EPS 數據測試", test_fetch_eps_data),
+        ("股息數據測試", test_fetch_dividend_data)
+    ]
+    
+    results = []
+    for name, test_func in tests:
+        print(f"\n{'-' * 40}")
+        print(f"執行 {name}...")
+        success = test_func()
+        results.append((name, success))
+    
+    # 顯示總結果
+    print("\n" + "=" * 50)
+    print("測試結果總結:")
+    all_success = True
+    for name, success in results:
+        status = "✅ 成功" if success else "❌ 失敗"
+        all_success = all_success and success
+        print(f"  {name}: {status}")
+    
+    print("-" * 50)
+    if all_success:
+        print("所有測試都成功通過! 財報數據獲取功能正常。")
+    else:
+        print("部分測試失敗，請檢查輸出日誌找出問題。")
+    print("=" * 50)
+
+if __name__ == "__main__":
+    run_all_tests()
+EOF
+
+      - name: Run financial data test
+        env:
+          GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python test_financial.py
