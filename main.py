@@ -2,9 +2,6 @@
 import os
 import sys
 import argparse
-import schedule
-import time
-import threading
 from datetime import datetime
 
 # 引入現有功能模組
@@ -16,7 +13,6 @@ from modules.line_bot import send_line_bot_message
 
 # 引入新功能模組
 from modules.stock_recommender import get_stock_recommendations, get_weak_valley_alerts, send_recommendations_to_user, send_weak_valley_alerts_to_user
-from modules.multi_analysis import analyze_stock_value
 
 # 檢查命令行參數
 parser = argparse.ArgumentParser(description='twstock-line-bot')
@@ -87,14 +83,6 @@ def evening_push():
     except Exception as e:
         print(f"[main] ❌ 盤後分析推播失敗：{e}")
 
-# 設置排程任務
-def setup_schedule():
-    # 只在交易日執行推播
-    schedule.every().day.at("09:00").do(lambda: is_trading_day() and morning_push())
-    schedule.every().day.at("12:30").do(lambda: is_trading_day() and noon_push())
-    schedule.every().day.at("13:00").do(lambda: is_trading_day() and afternoon_push())
-    schedule.every().day.at("15:00").do(lambda: is_trading_day() and evening_push())
-
 def is_trading_day():
     """檢查今天是否為交易日 (排除假日和週末)"""
     today = datetime.now()
@@ -102,12 +90,14 @@ def is_trading_day():
     
     # 週末不是交易日
     if weekday >= 5:  # 5=週六, 6=週日
+        print("[main] 今天是週末，不執行推播")
         return False
     
     # 這裡可以添加台灣股市假日檢查邏輯
     # 可以使用一個假日列表或API來檢查
-    holidays = get_taiwan_stock_holidays()  # 實現這個函數來獲取台灣股市假日
+    holidays = get_taiwan_stock_holidays()
     if today.strftime('%Y-%m-%d') in holidays:
+        print(f"[main] 今天是股市假日 {today.strftime('%Y-%m-%d')}，不執行推播")
         return False
     
     return True
@@ -124,16 +114,14 @@ def get_taiwan_stock_holidays():
         # 更多假日...
     ]
 
-# 在單獨的線程中運行排程器
-def run_scheduler():
-    setup_schedule()
-    print("[main] ✅ 排程器已啟動")
-    while True:
-        schedule.run_pending()
-        time.sleep(60)  # 每分鐘檢查一次排程
-
 # 根據命令行參數執行相應功能
 if args.mode:
+    # 首先檢查是否為交易日
+    if not is_trading_day() and args.mode in ['morning', 'noon', 'afternoon', 'evening']:
+        print(f"[main] ⚠️ 今天不是交易日，不執行 {args.mode} 推播")
+        sys.exit(0)
+        
+    # 執行指定模式
     if args.mode == 'opening':
         analyze_opening()
     elif args.mode == 'intraday':
@@ -151,17 +139,6 @@ if args.mode:
     elif args.mode == 'evening':
         evening_push()
     sys.exit(0)
-
-# 如果沒有指定模式，啟動排程器
-print("[main] 啟動排程服務...")
-scheduler_thread = threading.Thread(target=run_scheduler)
-scheduler_thread.daemon = True
-scheduler_thread.start()
-
-# 維持主線程運行，避免程序退出
-try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("[main] 程序被用戶中斷")
-    sys.exit(0)
+else:
+    print("[main] ⚠️ 未指定執行模式，使用方式: python main.py --mode=[opening|intraday|dividend|closing|morning|noon|afternoon|evening]")
+    sys.exit(1)
