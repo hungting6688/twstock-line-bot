@@ -207,7 +207,7 @@ def analyze_fundamental(stock_code):
     """基本面分析"""
     try:
         # 使用現有模組獲取基本面資料
-        from modules.eps_dividend_scraper import get_eps_data
+        from modules.data.scraper import get_eps_data
         eps_data = get_eps_data()
         
         # 從 Yahoo Finance 獲取其他基本面數據
@@ -300,7 +300,7 @@ def analyze_industry(stock_code):
         # 取得股票產業別
         # 優先使用現有模組
         try:
-            from modules.twse_scraper import get_all_valid_twse_stocks
+            from modules.data.scraper import get_all_valid_twse_stocks
             all_stocks = get_all_valid_twse_stocks()
             stock_info = next((s for s in all_stocks if s['stock_id'] == stock_code), None)
             industry = stock_info['industry'] if stock_info else None
@@ -359,7 +359,7 @@ def analyze_market_sentiment(stock_code):
     """市場情緒分析"""
     try:
         # 1. 獲取整體市場情緒
-        from modules.market_sentiment import get_market_sentiment_score
+        from modules.analysis.sentiment import get_market_sentiment_score
         market_score = get_market_sentiment_score()
         
         # 2. 獲取個股相對強度
