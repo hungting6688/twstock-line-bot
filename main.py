@@ -4,11 +4,13 @@ import sys
 import argparse
 from datetime import datetime
 
-# 引入現有功能模組
-from modules.run_opening import analyze_opening
-from modules.intraday_monitor import analyze_intraday
-from modules.dividend import analyze_dividend
-from modules.closing_summary import analyze_closing
+# 引入通知報告模組
+from modules.notification.reports import (
+    analyze_opening,
+    analyze_intraday,
+    analyze_dividend,
+    analyze_closing
+)
 from modules.notification.line_bot import send_line_bot_message
 
 # 引入新功能模組
