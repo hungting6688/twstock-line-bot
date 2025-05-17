@@ -1,4 +1,4 @@
-name: 開盤推薦（09:00）
+name: 早盤推薦（09:00）
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-opening:
+  run-morning:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,10 +16,10 @@ jobs:
           python-version: '3.10'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run Opening Analysis
+      - name: Run Morning Recommendations
         env:
           GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
-        run: python main.py --mode=opening
+        run: python main.py --mode=morning
