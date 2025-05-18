@@ -1,7 +1,39 @@
 """
-修改 modules/data/scraper.py 中的 get_eps_data 和 get_dividend_data 函數
-整合備用方案
+數據爬蟲模組 - 整合 eps_dividend_scraper.py、fundamental_scraper.py、twse_scraper.py
 """
+print("[scraper] ✅ 已載入最新版")
+
+import requests
+import pandas as pd
+from io import StringIO
+import datetime
+from bs4 import BeautifulSoup
+import io
+
+
+def get_latest_season():
+    """
+    獲取最近一季的年度和季度
+    
+    返回:
+    - 民國年，季度(01, 02, 03, 04)
+    """
+    now = datetime.datetime.now()
+    year = now.year - 1911  # 轉換為民國年
+    month = now.month
+    
+    if month <= 3:
+        season = "04"
+        year -= 1  # 前一年第四季
+    elif month <= 6:
+        season = "01"  # 當年第一季
+    elif month <= 9:
+        season = "02"  # 當年第二季
+    else:
+        season = "03"  # 當年第三季
+        
+    return str(year), season
+
 
 def get_eps_data():
     """
@@ -104,6 +136,89 @@ def get_eps_data():
     return result
 
 
+def get_all_valid_twse_stocks():
+    """
+    從證交所獲取所有有效的上市股票
+    
+    返回:
+    - 股票資訊列表 [{"stock_id": id, "stock_name": name, "market_type": type, "industry": ind}]
+    """
+    url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.encoding = 'big5'
+
+        tables = pd.read_html(StringIO(response.text))
+        df = tables[0]
+        df.columns = df.iloc[0]
+        df = df[1:]
+
+        all_stocks = []
+        for _, row in df.iterrows():
+            if pd.isna(row["有價證券代號及名稱"]):
+                continue
+                
+            parts = str(row["有價證券代號及名稱"]).split()
+            if len(parts) != 2:
+                continue
+                
+            stock_id, stock_name = parts
+            market_type = str(row["市場別"])
+            industry = str(row["產業別"])
+
+            # 篩選上市股票，排除下市、空白代碼
+            if not stock_id.isdigit():
+                continue
+
+            # 排除已下市或特別標記的股票
+            if "下市" in stock_name:
+                continue
+
+            all_stocks.append({
+                "stock_id": stock_id,
+                "stock_name": stock_name,
+                "market_type": market_type,
+                "industry": industry
+            })
+
+        print(f"[scraper] ✅ 成功獲取 {len(all_stocks)} 檔上市股票列表")
+        return all_stocks
+    except Exception as e:
+        print(f"[scraper] ❌ 獲取上市股票列表失敗：{e}")
+        # 如果失敗，返回一個包含主要上市公司的備用列表
+        print(f"[scraper] ⚠️ 使用備用上市股票列表...")
+        return get_backup_stock_list()
+
+
+def get_backup_stock_list():
+    """提供備用的上市股票列表"""
+    backup_stocks = [
+        {"stock_id": "2330", "stock_name": "台積電", "market_type": "上市", "industry": "半導體業"},
+        {"stock_id": "2317", "stock_name": "鴻海", "market_type": "上市", "industry": "電子零組件業"},
+        {"stock_id": "2303", "stock_name": "聯電", "market_type": "上市", "industry": "半導體業"},
+        {"stock_id": "2308", "stock_name": "台達電", "market_type": "上市", "industry": "電子零組件業"},
+        {"stock_id": "2454", "stock_name": "聯發科", "market_type": "上市", "industry": "半導體業"},
+        {"stock_id": "2412", "stock_name": "中華電", "market_type": "上市", "industry": "電信業"},
+        {"stock_id": "2882", "stock_name": "國泰金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "1301", "stock_name": "台塑", "market_type": "上市", "industry": "塑膠工業"},
+        {"stock_id": "1303", "stock_name": "南亞", "market_type": "上市", "industry": "塑膠工業"},
+        {"stock_id": "2881", "stock_name": "富邦金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "1216", "stock_name": "統一", "market_type": "上市", "industry": "食品工業"},
+        {"stock_id": "2002", "stock_name": "中鋼", "market_type": "上市", "industry": "鋼鐵工業"},
+        {"stock_id": "2886", "stock_name": "兆豐金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "1101", "stock_name": "台泥", "market_type": "上市", "industry": "水泥工業"},
+        {"stock_id": "2891", "stock_name": "中信金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "3711", "stock_name": "日月光投控", "market_type": "上市", "industry": "半導體業"},
+        {"stock_id": "2327", "stock_name": "國巨", "market_type": "上市", "industry": "電子零組件業"},
+        {"stock_id": "2912", "stock_name": "統一超", "market_type": "上市", "industry": "貿易百貨"},
+        {"stock_id": "2207", "stock_name": "和泰車", "market_type": "上市", "industry": "汽車工業"},
+        {"stock_id": "2884", "stock_name": "玉山金", "market_type": "上市", "industry": "金融業"}
+    ]
+    return backup_stocks
+
+
 def get_eps_data_from_yahoo():
     """
     使用 Yahoo Finance 獲取 EPS 和股息數據 (備用方案)
@@ -128,7 +243,7 @@ def get_eps_data_from_yahoo():
             stock_id = stock["stock_id"]
             futures[executor.submit(fetch_stock_finance, stock_id)] = stock_id
         
-        for future in tqdm(futures, desc="[scraper] 獲取財務數據"):
+        for future in futures:
             stock_id = futures[future]
             try:
                 data = future.result()
@@ -176,3 +291,97 @@ def get_dividend_data():
     """
     all_data = get_eps_data()
     return {sid: val["dividend"] for sid, val in all_data.items() if val["dividend"] is not None}
+
+
+def get_all_valid_twse_stocks_with_type():
+    """
+    獲取所有上市股票，並添加股票類型標記（大型股、中小型股、ETF）
+    
+    返回:
+    - 添加了類型的股票列表
+    """
+    from modules.data.fetcher import is_etf
+    
+    raw = get_all_valid_twse_stocks()
+    stocks = []
+    
+    for item in raw:
+        stock_id = item["stock_id"]
+        stock_name = item["stock_name"]
+        
+        # 判斷股票類型
+        if is_etf(stock_name):
+            stock_type = "etf"
+        elif int(stock_id) < 4000:
+            stock_type = "large"  # 一般認為編號小於4000的多為大型股
+        else:
+            stock_type = "small"  # 編號大於4000多為中小型股
+            
+        stocks.append({
+            "stock_id": stock_id, 
+            "stock_name": stock_name, 
+            "type": stock_type,
+            "industry": item["industry"]
+        })
+        
+    return stocks
+
+
+def fetch_fundamental_data(stock_ids):
+    """
+    獲取基本面數據（PE, PB, ROE, 法人持股等）
+    
+    參數:
+    - stock_ids: 股票代碼列表
+    
+    返回:
+    - 包含基本面資訊的 DataFrame
+    """
+    print("[scraper] ⏳ 開始擷取法人與本益比資料...")
+    base_url = "https://goodinfo.tw/tw/StockInfo.asp?STOCK_ID="
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+    result = []
+
+    for stock_id in stock_ids:
+        try:
+            stock_id = str(stock_id).replace('="', '').replace('"', '').strip()
+            url = base_url + stock_id
+            resp = requests.get(url, headers=headers, timeout=10)
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            tables = pd.read_html(StringIO(str(soup)), flavor="bs4")
+            summary_table = None
+            for table in tables:
+                if "本益比" in str(table):
+                    summary_table = table
+                    break
+
+            if summary_table is None or len(summary_table.columns) < 2:
+                raise ValueError("無法擷取正確欄位")
+
+            flat = summary_table.values.flatten()
+            pe, pb, roe = None, None, None
+            for idx, val in enumerate(flat):
+                if str(val).strip() == "本益比":
+                    pe = float(flat[idx + 1])
+                if str(val).strip() == "股價淨值比":
+                    pb = float(flat[idx + 1])
+                if str(val).strip() == "ROE":
+                    roe = float(flat[idx + 1])
+
+            result.append({
+                "證券代號": stock_id,
+                "PE": pe,
+                "PB": pb,
+                "ROE": roe,
+                "外資": None,  # 可擴展加入法人持股資訊
+                "投信": None,
+                "自營商": None,
+            })
+
+        except Exception as e:
+            print(f"[scraper] ⚠️ {stock_id} 擷取失敗：{e}")
+
+    return pd.DataFrame(result)
