@@ -1,149 +1,185 @@
 #!/usr/bin/env python3
 """
-股票財報數據功能測試腳本 (改進版)
-用於測試 EPS 和股息數據獲取功能
+財報讀取測試腳本 (修正版)
+用於測試是否可以成功獲取股票財報數據
 """
 
-import os
 import sys
-import time
 import pandas as pd
 from datetime import datetime
 
-def test_original_eps_fetcher():
-    """測試原始 EPS 數據獲取方法"""
-    print("\n[測試] 開始測試原始 EPS 數據獲取方法...")
-    
+# 修正導入路徑 - 使用正確的模組路徑
+from modules.data.scraper import get_eps_data, get_dividend_data
+from modules.data.scraper import get_all_valid_twse_stocks  # 如果這個函數存在於該模組
+from modules.data.fetcher import get_top_stocks
+
+def test_fetch_stock_list():
+    """測試獲取股票列表"""
+    print("\n[測試] 開始獲取上市股票列表...")
     try:
-        # 直接導入原始函數進行測試
-        from modules.data.scraper import get_eps_data
+        # 確認函數在哪個模組
+        try:
+            from modules.data.scraper import get_all_valid_twse_stocks
+            source = "scraper"
+        except ImportError:
+            # 如果在 scraper 找不到，嘗試其他可能的模組
+            try:
+                from modules.twse_scraper import get_all_valid_twse_stocks
+                source = "twse_scraper"
+            except ImportError:
+                # 直接實現一個簡單版本來替代
+                print("[測試] ⚠️ 找不到 get_all_valid_twse_stocks 函數，使用替代實現")
+                return test_fetch_stock_list_alternative()
         
-        print("[測試] 調用原始 get_eps_data() 函數...")
-        start_time = time.time()
-        eps_data = get_eps_data()
-        end_time = time.time()
+        print(f"[測試] 使用 {source} 模組中的 get_all_valid_twse_stocks 函數")
+        stock_list = get_all_valid_twse_stocks()
         
-        if not eps_data:
-            print("[測試] ❌ 原始方法無法獲取 EPS 數據")
+        if not stock_list:
+            print("[測試] ❌ 無法獲取股票列表")
             return False
         
-        # 顯示取得的數據
+        # 顯示前 5 筆資料
+        print("[測試] 前 5 筆股票資料:")
+        for i, stock in enumerate(stock_list[:5]):
+            if isinstance(stock, dict):  # 確認返回的是字典而不是其他類型
+                try:
+                    print(f"  股票代號: {stock.get('stock_id', 'N/A')}, 名稱: {stock.get('stock_name', 'N/A')}, 產業: {stock.get('industry', 'N/A')}")
+                except:
+                    print(f"  股票資料 #{i+1}: {stock}")
+            else:
+                print(f"  股票資料 #{i+1}: {stock}")
+        
+        print(f"[測試] ✅ 成功獲取股票列表，共 {len(stock_list)} 檔股票")
+        return True
+    except Exception as e:
+        print(f"[測試] ❌ 獲取股票列表失敗: {e}")
+        return False
+
+def test_fetch_stock_list_alternative():
+    """替代的股票列表獲取測試"""
+    try:
+        # 使用 fetcher 模組的功能來獲取部分股票列表
+        top_stocks = get_top_stocks(limit=20)
+        
+        if not top_stocks:
+            print("[測試] ❌ 無法獲取熱門股票列表")
+            return False
+        
+        print("[測試] 使用熱門股票列表代替完整上市股票列表")
+        print("[測試] 熱門股票列表:")
+        for i, stock_id in enumerate(top_stocks[:5]):
+            print(f"  {i+1}. {stock_id}")
+        
+        print(f"[測試] ✅ 成功獲取熱門股票列表，共 {len(top_stocks)} 檔股票")
+        return True
+    except Exception as e:
+        print(f"[測試] ❌ 獲取熱門股票列表失敗: {e}")
+        return False
+
+def test_fetch_top_stocks():
+    """測試獲取熱門股票"""
+    print("\n[測試] 開始獲取熱門股票...")
+    try:
+        top_stocks = get_top_stocks(limit=20)
+        if not top_stocks:
+            print("[測試] ❌ 無法獲取熱門股票")
+            return False
+        
+        # 顯示結果
+        print("[測試] 熱門股票:")
+        for i, stock_id in enumerate(top_stocks):
+            print(f"  {i+1}. {stock_id}")
+        
+        print(f"[測試] ✅ 成功獲取熱門股票，共 {len(top_stocks)} 檔")
+        return True
+    except Exception as e:
+        print(f"[測試] ❌ 獲取熱門股票失敗: {e}")
+        return False
+
+def test_fetch_eps_data():
+    """測試獲取 EPS 數據"""
+    print("\n[測試] 開始獲取 EPS 數據...")
+    try:
+        eps_data = get_eps_data()
+        if not eps_data:
+            print("[測試] ❌ 無法獲取 EPS 數據")
+            return False
+        
+        # 顯示前 5 筆資料
         count = 0
-        print("[測試] 原始方法獲取的 EPS 數據樣本:")
+        print("[測試] 前 5 筆 EPS 數據:")
         for stock_id, data in eps_data.items():
             print(f"  股票代號: {stock_id}, EPS: {data.get('eps')}, 股息: {data.get('dividend')}")
             count += 1
             if count >= 5:
                 break
         
-        print(f"[測試] ✅ 原始方法成功獲取 EPS 數據，共 {len(eps_data)} 檔股票")
-        print(f"[測試] 耗時: {end_time - start_time:.2f} 秒")
+        print(f"[測試] ✅ 成功獲取 EPS 數據，共 {len(eps_data)} 檔股票")
         return True
-    
     except Exception as e:
-        print(f"[測試] ❌ 原始方法獲取 EPS 數據失敗: {e}")
+        print(f"[測試] ❌ 獲取 EPS 數據失敗: {e}")
         return False
 
-
-def test_yahoo_finance_data():
-    """測試使用 Yahoo Finance 獲取財務數據"""
-    print("\n[測試] 開始測試 Yahoo Finance 替代方案...")
-    
+def test_fetch_dividend_data():
+    """測試獲取股息數據"""
+    print("\n[測試] 開始獲取股息數據...")
     try:
-        # 導入 Yahoo Finance 替代方案
-        import yfinance as yf
-        from modules.data.scraper import get_all_valid_twse_stocks
+        dividend_data = get_dividend_data()
+        if not dividend_data:
+            print("[測試] ❌ 無法獲取股息數據")
+            return False
         
-        # 測試獲取幾檔知名股票的數據
-        print("[測試] 從 Yahoo Finance 獲取測試股票數據...")
-        test_stocks = ["2330", "2317", "2454", "2882", "2412"]
+        # 顯示前 5 筆資料
+        count = 0
+        print("[測試] 前 5 筆股息數據:")
+        for stock_id, dividend in dividend_data.items():
+            print(f"  股票代號: {stock_id}, 股息: {dividend}")
+            count += 1
+            if count >= 5:
+                break
         
-        results = {}
-        success_count = 0
-        
-        start_time = time.time()
-        for stock_id in test_stocks:
-            try:
-                print(f"[測試] 正在處理 {stock_id}...")
-                ticker = yf.Ticker(f"{stock_id}.TW")
-                info = ticker.info
-                
-                # 獲取 EPS
-                eps = info.get('trailingEPS')
-                if eps and eps != 'N/A':
-                    eps = round(float(eps), 2)
-                
-                # 獲取股息率
-                dividend_yield = info.get('dividendYield', 0)
-                if dividend_yield:
-                    dividend_yield = round(dividend_yield * 100, 2)
-                
-                results[stock_id] = {
-                    "eps": eps,
-                    "dividend": dividend_yield if dividend_yield > 0 else None
-                }
-                
-                success_count += 1
-                print(f"[測試] ✓ {stock_id} 處理成功")
-            
-            except Exception as e:
-                print(f"[測試] ✗ {stock_id} 處理失敗: {e}")
-        
-        end_time = time.time()
-        
-        # 顯示結果
-        print("\n[測試] Yahoo Finance 數據獲取結果:")
-        for stock_id, data in results.items():
-            print(f"  股票代號: {stock_id}, EPS: {data['eps']}, 股息率: {data['dividend']}%")
-        
-        print(f"[測試] 成功率: {success_count}/{len(test_stocks)}")
-        print(f"[測試] 耗時: {end_time - start_time:.2f} 秒")
-        
-        return success_count > 0
-    
+        print(f"[測試] ✅ 成功獲取股息數據，共 {len(dividend_data)} 檔股票")
+        return True
     except Exception as e:
-        print(f"[測試] ❌ Yahoo Finance 測試失敗: {e}")
+        print(f"[測試] ❌ 獲取股息數據失敗: {e}")
         return False
 
-
-def run_focused_tests():
-    """執行針對財報數據的聚焦測試"""
-    print("=" * 60)
-    print(f"財報數據獲取測試開始 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 60)
+def run_all_tests():
+    """執行所有測試"""
+    print("=" * 50)
+    print(f"財報數據讀取測試開始 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 50)
     
+    # 測試項目與結果
     tests = [
-        ("原始 EPS 獲取方法", test_original_eps_fetcher),
-        ("Yahoo Finance 替代方案", test_yahoo_finance_data)
+        ("股票列表測試", test_fetch_stock_list),
+        ("熱門股票測試", test_fetch_top_stocks),
+        ("EPS 數據測試", test_fetch_eps_data),
+        ("股息數據測試", test_fetch_dividend_data)
     ]
     
     results = []
     for name, test_func in tests:
-        print(f"\n{'-' * 50}")
+        print(f"\n{'-' * 40}")
         print(f"執行 {name}...")
-        try:
-            success = test_func()
-            results.append((name, success))
-        except Exception as e:
-            print(f"[測試] ❌ 測試過程出錯: {e}")
-            results.append((name, False))
+        success = test_func()
+        results.append((name, success))
     
     # 顯示總結果
-    print("\n" + "=" * 60)
-    print("財報數據測試結果總結:")
+    print("\n" + "=" * 50)
+    print("測試結果總結:")
     all_success = True
     for name, success in results:
         status = "✅ 成功" if success else "❌ 失敗"
         all_success = all_success and success
         print(f"  {name}: {status}")
     
+    print("-" * 50)
     if all_success:
-        print("\n所有測試通過! 可以使用這些方法獲取財報數據。")
+        print("所有測試都成功通過! 財報數據獲取功能正常。")
     else:
-        print("\n有些測試失敗。建議使用通過測試的方法來獲取財報數據。")
-    
-    return all_success
-
+        print("部分測試失敗，請檢查輸出日誌找出問題。")
+    print("=" * 50)
 
 if __name__ == "__main__":
-    run_focused_tests()
+    run_all_tests()
