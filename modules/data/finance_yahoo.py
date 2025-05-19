@@ -1,96 +1,116 @@
 """
-改用 yfinance 獲取 EPS 和股息數據的替代實現
+處理 Yahoo Finance Rate Limit 問題
 """
 
-import yfinance as yf
-import concurrent.futures
-from tqdm import tqdm
-
-def get_eps_data_alternative():
+def get_eps_data_from_yahoo():
     """
-    使用 yfinance 替代方案獲取 EPS 和股息數據
-    
-    返回:
-    - 字典: {stock_id: {"eps": value, "dividend": value}}
+    使用 Yahoo Finance 獲取 EPS 和股息數據 (備用方案)，增加速率限制處理
     """
-    from modules.data.scraper import get_all_valid_twse_stocks
+    import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor
+    from tqdm import tqdm
+    import time
+    import random
     
-    print("[scraper] 使用 yfinance 替代方案獲取 EPS 和股息數據...")
+    print("[scraper] 使用 Yahoo Finance 替代方案獲取財務數據...")
     
-    # 獲取所有上市股票列表
-    all_stocks = get_all_valid_twse_stocks()
-    
-    # 限制獲取的股票數量，避免耗時過長
-    max_stocks = 300  # 您可以根據需要調整
-    stocks_to_process = all_stocks[:max_stocks]
+    # 獲取股票列表
+    stock_list = get_all_valid_twse_stocks()
+    # 限制股票數量，避免請求過多
+    max_stocks = 50  # 降低同時請求的數量
+    stock_list = stock_list[:max_stocks]
     
     result = {}
     
-    # 使用多線程加速處理
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        # 提交所有任務
-        future_to_stock = {
-            executor.submit(fetch_single_stock_data, stock): stock 
-            for stock in stocks_to_process
-        }
-        
-        # 處理結果
-        for future in tqdm(concurrent.futures.as_completed(future_to_stock), 
-                          total=len(stocks_to_process),
-                          desc="[scraper] 獲取財務數據"):
-            stock = future_to_stock[future]
+    # 使用隨機延遲避免被視為自動請求機器人
+    def fetch_with_retry(stock_id):
+        """帶有重試邏輯的抓取函數"""
+        max_retries = 3
+        for retry in range(max_retries):
             try:
-                data = future.result()
-                if data:
-                    result[stock['stock_id']] = data
+                # 加入隨機延遲，避免請求過於頻繁
+                time.sleep(random.uniform(0.5, 2.0))
+                data = fetch_stock_finance(stock_id)
+                return data
             except Exception as e:
-                print(f"[scraper] ⚠️ 處理 {stock['stock_id']} 時出錯: {e}")
+                if "Too Many Requests" in str(e):
+                    wait_time = (retry + 1) * 5  # 逐漸增加等待時間
+                    print(f"[scraper] ⚠️ Rate limit for {stock_id}, waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"[scraper] ⚠️ 處理 {stock_id} 時出錯: {str(e)[:100]}")
+                    if retry == max_retries - 1:  # 最後一次重試
+                        return None
     
-    print(f"[scraper] ✅ 成功獲取 {len(result)} 檔股票的財務數據")
+    # 分批處理以避免同時發送過多請求
+    batch_size = 10
+    for i in range(0, len(stock_list), batch_size):
+        batch = stock_list[i:i+batch_size]
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:  # 減少同時執行的線程數
+            futures = {}
+            for stock in batch:
+                stock_id = stock["stock_id"]
+                futures[executor.submit(fetch_with_retry, stock_id)] = stock_id
+            
+            for future in futures:
+                stock_id = futures[future]
+                try:
+                    data = future.result()
+                    if data:
+                        result[stock_id] = data
+                except Exception as e:
+                    print(f"[scraper] ⚠️ 處理 {stock_id} 時出錯: {str(e)[:100]}")
+        
+        # 每個批次間暫停一下
+        time.sleep(2)
+    
+    print(f"[scraper] ✅ 成功獲取 {len(result)} 檔股票的財務數據 (Yahoo Finance)")
     return result
 
-def fetch_single_stock_data(stock):
+
+def fetch_stock_finance(stock_id):
     """
-    獲取單一股票的財務數據
-    
-    參數:
-    - stock: 股票資訊字典
-    
-    返回:
-    - 財務數據字典
+    從 Yahoo Finance 獲取單一股票的財務數據，增加錯誤處理
     """
     try:
-        stock_id = stock['stock_id']
-        # 使用 yfinance 獲取股票數據
+        import yfinance as yf
+        
         ticker = yf.Ticker(f"{stock_id}.TW")
         info = ticker.info
         
-        # 獲取 EPS
+        # 獲取財務數據
         eps = info.get('trailingEPS')
-        
-        # 獲取股息率
-        dividend_rate = info.get('dividendRate')
         dividend_yield = info.get('dividendYield', 0)
         
-        # 如果有股息率，轉換為百分比
-        if dividend_yield:
-            dividend_yield = round(dividend_yield * 100, 2)
+        # 增加檢查，確保獲取到有效數據
+        if eps is None or eps == 'N/A':
+            eps = None
+        else:
+            try:
+                eps = float(eps)
+                eps = round(eps, 2)
+            except:
+                eps = None
         
-        # 返回數據
+        # 轉換股息率為百分比
+        if dividend_yield is None or dividend_yield == 'N/A':
+            dividend_yield = None
+        else:
+            try:
+                dividend_yield = float(dividend_yield)
+                if dividend_yield > 0:
+                    dividend_yield = round(dividend_yield * 100, 2)
+                else:
+                    dividend_yield = None
+            except:
+                dividend_yield = None
+        
         return {
-            "eps": round(eps, 2) if eps else None,
+            "eps": eps,
             "dividend": dividend_yield
         }
     except Exception as e:
-        # 忽略錯誤，跳過此股票
+        if "Too Many Requests" in str(e):
+            raise e  # 讓呼叫者知道是 rate limit 問題
         return None
-
-def get_dividend_data_alternative():
-    """
-    獲取股息數據的替代實現
-    
-    返回:
-    - 字典: {stock_id: dividend_value}
-    """
-    eps_data = get_eps_data_alternative()
-    return {sid: val["dividend"] for sid, val in eps_data.items() if val["dividend"] is not None}
