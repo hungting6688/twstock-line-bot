@@ -30,6 +30,7 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=12):
     - 字典: {stock_id: {"eps": value, "dividend": value}}
     """
     from modules.data.scraper import get_all_valid_twse_stocks
+    from modules.data.fetcher import get_top_stocks
     
     # 檢查緩存
     cache_file = os.path.join(CACHE_DIR, 'eps_data_cache.json')
@@ -48,17 +49,23 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=12):
     
     print("[finance_yahoo] 使用 yfinance 替代方案獲取 EPS 和股息數據...")
     
-    # 獲取所有上市股票列表
+    # 獲取熱門股票列表而不是全部股票列表
     try:
-        all_stocks = get_all_valid_twse_stocks()
-        print(f"[finance_yahoo] ✅ 成功獲取 {len(all_stocks)} 檔上市股票列表")
+        # 根據當前時段決定掃描檔數
+        mode = get_current_mode()
+        scan_limit = get_scan_limit_for_mode(mode)
+        print(f"[finance_yahoo] 當前時段: {mode}, 掃描限制: {scan_limit}檔")
+        
+        # 獲取前N檔熱門股票
+        top_stocks = get_top_stocks(limit=scan_limit)
+        print(f"[finance_yahoo] ✅ 成功獲取 {len(top_stocks)} 檔熱門股票")
     except Exception as e:
-        print(f"[finance_yahoo] ⚠️ 無法獲取股票列表: {e}，使用備用清單")
-        all_stocks = get_backup_stock_list()
+        print(f"[finance_yahoo] ⚠️ 無法獲取熱門股票列表: {e}，使用備用清單")
+        top_stocks = [s['stock_id'] for s in get_backup_stock_list()[:100]]
     
     # 限制獲取的股票數量，避免耗時過長
-    max_stocks = 100  # 減少處理的股票數量，避免過多請求
-    stocks_to_process = all_stocks[:max_stocks]
+    stocks_to_process = top_stocks[:scan_limit]
+    print(f"[finance_yahoo] 限制處理 {len(stocks_to_process)} 檔股票")
     
     result = {}
     
@@ -72,19 +79,19 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=12):
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             # 提交所有任務
             future_to_stock = {
-                executor.submit(fetch_single_stock_data_with_retry, stock): stock 
-                for stock in batch
+                executor.submit(fetch_single_stock_data_with_retry, stock_id): stock_id 
+                for stock_id in batch
             }
             
             # 處理結果
             for future in concurrent.futures.as_completed(future_to_stock):
-                stock = future_to_stock[future]
+                stock_id = future_to_stock[future]
                 try:
                     data = future.result()
                     if data:
-                        result[stock['stock_id']] = data
+                        result[stock_id] = data
                 except Exception as e:
-                    print(f"[finance_yahoo] ⚠️ 處理 {stock['stock_id']} 時出錯: {e}")
+                    print(f"[finance_yahoo] ⚠️ 處理 {stock_id} 時出錯: {e}")
         
         # 批次間添加延遲
         if i + batch_size < len(stocks_to_process):
@@ -109,26 +116,60 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=12):
     
     return result
 
-def fetch_single_stock_data_with_retry(stock, max_retries=3):
+def get_current_mode():
+    """
+    根據當前時間確定執行模式
+    
+    返回:
+    - 'morning', 'noon', 'afternoon', 或 'evening'
+    """
+    current_hour = (datetime.now() + timedelta(hours=8)).hour  # 台灣時間
+    
+    if current_hour < 10:
+        return 'morning'
+    elif current_hour < 12:
+        return 'afternoon'
+    elif current_hour < 14:
+        return 'noon'
+    else:
+        return 'evening'
+
+def get_scan_limit_for_mode(mode):
+    """
+    根據模式獲取掃描限制
+    
+    參數:
+    - mode: 模式名稱
+    
+    返回:
+    - 掃描限制數量
+    """
+    limits = {
+        'morning': 100,
+        'afternoon': 200,
+        'noon': 200,
+        'evening': 500
+    }
+    return limits.get(mode, 100)
+
+def fetch_single_stock_data_with_retry(stock_id, max_retries=3):
     """
     使用重試機制獲取單一股票的財務數據
     
     參數:
-    - stock: 股票資訊字典
+    - stock_id: 股票代碼
     - max_retries: 最大重試次數
     
     返回:
     - 財務數據字典
-    """
-    stock_id = stock['stock_id']
-    
+    """    
     for retry in range(max_retries):
         try:
             # 添加隨機延遲，避免過於頻繁的請求
             delay = random.uniform(0.5, 1.5) * (retry + 1)
             time.sleep(delay)
             
-            return fetch_single_stock_data(stock)
+            return fetch_single_stock_data(stock_id)
             
         except Exception as e:
             if "Too Many Requests" in str(e) and retry < max_retries - 1:
@@ -144,18 +185,17 @@ def fetch_single_stock_data_with_retry(stock, max_retries=3):
     
     return None
 
-def fetch_single_stock_data(stock):
+def fetch_single_stock_data(stock_id):
     """
     獲取單一股票的財務數據
     
     參數:
-    - stock: 股票資訊字典
+    - stock_id: 股票代碼 (字符串)
     
     返回:
     - 財務數據字典
     """
     try:
-        stock_id = stock['stock_id']
         # 使用 yfinance 獲取股票數據
         ticker = yf.Ticker(f"{stock_id}.TW")
         info = ticker.info
@@ -194,7 +234,7 @@ def fetch_single_stock_data(stock):
         if "Too Many Requests" in str(e):
             raise
         
-        print(f"[finance_yahoo] ⚠️ {stock['stock_id']} 處理失敗: {e}")
+        print(f"[finance_yahoo] ⚠️ {stock_id} 處理失敗: {e}")
         return None
 
 def get_dividend_data_alternative(use_cache=True, cache_expiry_hours=12):
