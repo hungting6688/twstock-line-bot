@@ -16,9 +16,9 @@ def analyze_opening():
     print("[reports] ⏳ 執行開盤前分析...")
 
     try:
-        # 使用推薦模組獲取開盤前推薦
-        stocks = get_stock_recommendations('morning')
-        weak_valleys = get_weak_valley_alerts()
+        # 使用推薦模組獲取開盤前推薦，限制推薦數量
+        stocks = get_stock_recommendations('morning', 6)  # 6檔推薦股票
+        weak_valleys = get_weak_valley_alerts(2)  # 2檔極弱谷股票
         
         # 生成報告
         now = datetime.now().strftime("%Y/%m/%d")
@@ -56,8 +56,9 @@ def analyze_intraday():
     print("[reports] ⏳ 執行盤中分析...")
 
     try:
-        # 獲取盤中推薦股票
-        stocks = get_stock_recommendations('noon')
+        # 獲取盤中推薦股票，限制推薦數量
+        stocks = get_stock_recommendations('noon', 6)  # 6檔推薦股票
+        weak_valleys = get_weak_valley_alerts(2)  # 2檔極弱谷股票
         
         # 生成報告
         now = datetime.now().strftime("%Y/%m/%d")
@@ -72,43 +73,12 @@ def analyze_intraday():
         else:
             message += "✅ 盤中機會：無\n\n"
 
-        # 獲取額外的技術分析
-        stock_ids = get_top_stocks(limit=100, filter_type="small_cap")  # 盤中以中小型股為主
-        tech_results = analyze_technical_indicators(stock_ids)
-        
-        # 篩選出有明顯信號的股票
-        breakout_stocks = []
-        for sid, data in tech_results.items():
-            if data["score"] >= 7 and data["label"] == "✅ 推薦":
-                # 避免與已推薦股重複
-                if not any(s["code"] == sid for s in stocks):
-                    try:
-                        # 從 Yahoo Finance 獲取股票名稱
-                        import yfinance as yf
-                        ticker = yf.Ticker(f"{sid}.TW")
-                        info = ticker.info
-                        name = info.get('shortName', sid)
-                        
-                        breakout_stocks.append({
-                            "stock_id": sid,
-                            "name": name,
-                            "score": data["score"],
-                            "reason": data["desc"],
-                            "suggestion": data["suggestion"]
-                        })
-                    except:
-                        # 若無法獲取名稱，則跳過
-                        continue
-        
-        # 限制數量
-        breakout_stocks = breakout_stocks[:3]
-                
-        if breakout_stocks:
-            message += "📌 盤中突破股：\n"
-            for stock in breakout_stocks:
-                message += f"🔸 {stock['stock_id']} {stock['name']}｜分數：{stock['score']}\n"
-                message += f"➡️ {stock['reason']}\n"
-                message += f"💡 {stock['suggestion']}\n\n"
+        if weak_valleys:
+            message += "⚠️ 極弱谷警報：\n"
+            for stock in weak_valleys:
+                message += f"❗ {stock['code']} {stock['name']}\n"
+                message += f"警報原因: {stock['alert_reason']}\n"
+                message += f"當前價格: {stock['current_price']}\n\n"
 
         send_line_bot_message(message.strip())
         print("[reports] ✅ 盤中分析完成")
@@ -131,10 +101,13 @@ def analyze_dividend():
         eps_data = get_eps_data()
         dividend_data = get_dividend_data()
         
-        # 篩選高息股
+        # 篩選高息股，但限制分析的股票數量
+        # 只從前200檔股票中尋找高息股
+        top_stocks = get_top_stocks(limit=200)
         high_dividend_stocks = []
-        for sid, dividend in dividend_data.items():
-            if dividend >= 4.0:  # 殖利率 >= 4% 視為高息股
+        
+        for sid in top_stocks:
+            if sid in dividend_data and dividend_data[sid] >= 4.0:  # 殖利率 >= 4% 視為高息股
                 try:
                     # 獲取股票名稱和其他資料
                     import yfinance as yf
@@ -146,20 +119,21 @@ def analyze_dividend():
                     eps = eps_data.get(sid, {}).get("eps", None)
                     
                     # 計算配息穩定性指數 (假設 EPS > 股息為穩定)
-                    stability = "穩定" if eps and eps > dividend else "風險"
+                    stability = "穩定" if eps and eps > dividend_data[sid] else "風險"
                     
                     high_dividend_stocks.append({
                         "stock_id": sid,
                         "name": name,
-                        "dividend": dividend,
+                        "dividend": dividend_data[sid],
                         "eps": eps,
                         "stability": stability
                     })
                 except:
                     continue
         
-        # 排序
+        # 排序並限制數量至10檔
         high_dividend_stocks.sort(key=lambda x: x["dividend"], reverse=True)
+        high_dividend_stocks = high_dividend_stocks[:10]
         
         # 生成報告
         now = datetime.now().strftime("%Y/%m/%d")
@@ -167,15 +141,10 @@ def analyze_dividend():
         
         if high_dividend_stocks:
             message += "✅ 高息潛力股：\n"
-            for i, stock in enumerate(high_dividend_stocks[:10]):  # 限制顯示數量
+            for stock in high_dividend_stocks:
                 eps_text = f"，EPS: {stock['eps']}" if stock['eps'] else ""
                 message += f"🔹 {stock['stock_id']} {stock['name']}｜殖利率: {stock['dividend']}%{eps_text}\n"
                 message += f"➡️ 配息評估: {stock['stability']}\n\n"
-                
-                # 限制訊息長度
-                if i >= 5 and len(message) > 1500:
-                    message += f"... 以及 {len(high_dividend_stocks) - i - 1} 檔其他高息股"
-                    break
         else:
             message += "無符合條件的高息股"
 
@@ -195,8 +164,8 @@ def analyze_closing():
     print("[reports] ⏳ 執行收盤分析...")
 
     try:
-        # 使用推薦模組獲取收盤後推薦
-        stocks = get_stock_recommendations('evening')
+        # 使用推薦模組獲取收盤後推薦，限制為10檔
+        stocks = get_stock_recommendations('evening', 10)
         
         # 生成報告
         now = datetime.now().strftime("%Y/%m/%d")
