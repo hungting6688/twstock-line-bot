@@ -247,6 +247,12 @@ def get_all_valid_twse_stocks(limit=None, use_cache=True, cache_expiry_hours=48)
                 # 檢查緩存是否過期
                 if datetime.datetime.now() - cache_time < datetime.timedelta(hours=cache_expiry_hours):
                     print(f"[scraper] ✅ 使用緩存的股票列表 (更新於 {cache_time.strftime('%Y-%m-%d %H:%M')})")
+                    
+                    # 在返回緩存結果前增加限制檢查
+                    if limit is not None and isinstance(limit, int) and limit > 0:
+                        print(f"[scraper] 限制返回 {limit} 檔股票")
+                        return cache_data['data'][:limit]
+                    
                     return cache_data['data']
         except Exception as e:
             print(f"[scraper] ⚠️ 讀取股票列表緩存失敗: {e}")
@@ -275,12 +281,6 @@ def get_all_valid_twse_stocks(limit=None, use_cache=True, cache_expiry_hours=48)
                 print(f"[scraper] ⚠️ 獲取股票列表失敗 (嘗試 {attempt+1}/{max_attempts}): {e}")
                 if attempt < max_attempts - 1:
                     time.sleep(5 * (attempt + 1))
-                     # 在返回結果前增加限制檢查
-        if limit is not None and isinstance(limit, int) and limit > 0:
-        print(f"[scraper] 限制返回 {limit} 檔股票")
-        return all_stocks[:limit]
-    
-        return all_stocks
 
         # 解析數據
         tables = pd.read_html(StringIO(response.text))
@@ -331,12 +331,24 @@ def get_all_valid_twse_stocks(limit=None, use_cache=True, cache_expiry_hours=48)
             except Exception as e:
                 print(f"[scraper] ⚠️ 寫入股票列表緩存失敗: {e}")
         
+        # 在返回結果前增加限制檢查
+        if limit is not None and isinstance(limit, int) and limit > 0:
+            print(f"[scraper] 限制返回 {limit} 檔股票")
+            return all_stocks[:limit]
+        
         return all_stocks
     except Exception as e:
         print(f"[scraper] ❌ 獲取上市股票列表失敗：{e}")
         # 如果失敗，返回一個包含主要上市公司的備用列表
         print(f"[scraper] ⚠️ 使用備用上市股票列表...")
-        return get_backup_stock_list()
+        backup_stocks = get_backup_stock_list()
+        
+        # 在返回備用列表前增加限制檢查
+        if limit is not None and isinstance(limit, int) and limit > 0:
+            print(f"[scraper] 限制返回 {limit} 檔備用股票")
+            return backup_stocks[:limit]
+        
+        return backup_stocks
 
 
 def get_backup_stock_list():
@@ -614,7 +626,7 @@ def fetch_fundamental_data(stock_ids, max_stocks=20):
                     except:
                         roe = None
 
-            result.append({
+           result.append({
                 "證券代號": stock_id,
                 "PE": pe,
                 "PB": pb,
