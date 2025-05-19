@@ -8,6 +8,7 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
+from email.utils import formatdate
 
 # 從環境變數獲取電子郵件設定
 EMAIL_SENDER = os.getenv("EMAIL_SENDER")        # 發件人郵箱
@@ -38,6 +39,7 @@ def send_email(subject, body, html_body=None):
     msg["Subject"] = subject
     msg["From"] = EMAIL_SENDER
     msg["To"] = EMAIL_RECEIVER
+    msg["Date"] = formatdate(localtime=True)
     
     # 添加純文本正文
     msg.attach(MIMEText(body, "plain", "utf-8"))
