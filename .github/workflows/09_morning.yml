@@ -16,10 +16,19 @@ jobs:
           python-version: '3.10'
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Set timezone
+        run: |
+          echo "Setting timezone to Asia/Taipei"
+          echo "TZ=Asia/Taipei" >> $GITHUB_ENV
+      - name: Debug date
+        run: |
+          echo "Current time: $(date)"
+          echo "Current day: $(date +%u)"  # 1=Mon, 7=Sun
       - name: Run Morning Recommendations
         env:
           GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          TZ: "Asia/Taipei"  # 設置環境變量
         run: python main.py --mode=morning
