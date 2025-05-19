@@ -58,8 +58,8 @@ def morning_push():
     """早盤前推播 (9:00)"""
     print("[main] ⏳ 執行早盤前推播...")
     try:
-        stocks = get_stock_recommendations('morning')
-        weak_valleys = get_weak_valley_alerts()
+        stocks = get_stock_recommendations('morning')  # 獲取6檔推薦股票
+        weak_valleys = get_weak_valley_alerts(2)  # 獲取2檔極弱谷股票
         
         # 使用雙重通知系統
         send_stock_recommendations(stocks, "早盤前")
@@ -77,10 +77,14 @@ def noon_push():
     """中午休盤推播 (12:30)"""
     print("[main] ⏳ 執行中午休盤推播...")
     try:
-        stocks = get_stock_recommendations('noon')
+        stocks = get_stock_recommendations('noon')  # 獲取6檔推薦股票
+        weak_valleys = get_weak_valley_alerts(2)  # 獲取2檔極弱谷股票
         
         # 使用雙重通知系統
         send_stock_recommendations(stocks, "中午休盤時")
+        if weak_valleys:
+            send_weak_valley_alerts(weak_valleys)
+        
         print("[main] ✅ 中午休盤推播完成")
     except Exception as e:
         error_message = f"[main] ❌ 中午休盤推播失敗：{e}"
@@ -92,10 +96,14 @@ def afternoon_push():
     """尾盤前推播 (13:00)"""
     print("[main] ⏳ 執行尾盤前推播...")
     try:
-        stocks = get_stock_recommendations('afternoon')
+        stocks = get_stock_recommendations('afternoon')  # 獲取6檔推薦股票
+        weak_valleys = get_weak_valley_alerts(2)  # 獲取2檔極弱谷股票
         
         # 使用雙重通知系統
         send_stock_recommendations(stocks, "尾盤前")
+        if weak_valleys:
+            send_weak_valley_alerts(weak_valleys)
+        
         print("[main] ✅ 尾盤前推播完成")
     except Exception as e:
         error_message = f"[main] ❌ 尾盤前推播失敗：{e}"
@@ -107,7 +115,7 @@ def evening_push():
     """盤後分析推播 (15:00)"""
     print("[main] ⏳ 執行盤後分析推播...")
     try:
-        stocks = get_stock_recommendations('evening')
+        stocks = get_stock_recommendations('evening')  # 獲取10檔推薦股票
         
         # 使用雙重通知系統
         send_stock_recommendations(stocks, "盤後分析")
@@ -117,7 +125,6 @@ def evening_push():
         print(error_message)
         # 系統錯誤也通知用戶
         send_notification(error_message, "系統錯誤 - 盤後分析推播失敗")
-
 def check_system_environment():
     """檢查系統環境"""
     print("[main] 🔍 開始檢查系統環境...")
