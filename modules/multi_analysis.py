@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 import yfinance as yf
 import time
+import threading
 
 def analyze_stock_value(stock_code):
     """
@@ -32,30 +33,80 @@ def analyze_stock_value(stock_code):
         'market_sentiment': 0.20  # 市場情緒權重
     }
     
-    # 執行各維度分析
-    try:
-        technical_score, technical_analysis = analyze_technical(stock_code)
-    except Exception as e:
-        print(f"[multi_analysis] ⚠️ 技術分析失敗：{e}")
-        technical_score, technical_analysis = 0, "技術分析失敗"
+    # 添加超時控制
+    result = {
+        "technical": {"completed": False, "score": 0, "analysis": "分析超時"},
+        "fundamental": {"completed": False, "score": 0, "analysis": "分析超時"},
+        "industry": {"completed": False, "score": 0, "analysis": "分析超時"},
+        "market_sentiment": {"completed": False, "score": 0, "analysis": "分析超時"}
+    }
     
-    try:
-        fundamental_score, fundamental_analysis = analyze_fundamental(stock_code)
-    except Exception as e:
-        print(f"[multi_analysis] ⚠️ 基本面分析失敗：{e}")
-        fundamental_score, fundamental_analysis = 0, "基本面分析失敗"
+    # 創建線程執行各維度分析
+    threads = []
     
-    try:
-        industry_score, industry_analysis = analyze_industry(stock_code)
-    except Exception as e:
-        print(f"[multi_analysis] ⚠️ 產業分析失敗：{e}")
-        industry_score, industry_analysis = 0, "產業分析失敗"
+    # 技術面分析線程
+    def run_technical():
+        try:
+            score, analysis = analyze_technical(stock_code)
+            result["technical"] = {"completed": True, "score": score, "analysis": analysis}
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ 技術分析失敗：{e}")
+            result["technical"] = {"completed": True, "score": 0, "analysis": f"技術分析失敗: {str(e)}"}
     
-    try:
-        sentiment_score, sentiment_analysis = analyze_market_sentiment(stock_code)
-    except Exception as e:
-        print(f"[multi_analysis] ⚠️ 市場情緒分析失敗：{e}")
-        sentiment_score, sentiment_analysis = 0, "市場情緒分析失敗"
+    # 基本面分析線程
+    def run_fundamental():
+        try:
+            score, analysis = analyze_fundamental(stock_code)
+            result["fundamental"] = {"completed": True, "score": score, "analysis": analysis}
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ 基本面分析失敗：{e}")
+            result["fundamental"] = {"completed": True, "score": 0, "analysis": f"基本面分析失敗: {str(e)}"}
+    
+    # 產業分析線程
+    def run_industry():
+        try:
+            score, analysis = analyze_industry(stock_code)
+            result["industry"] = {"completed": True, "score": score, "analysis": analysis}
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ 產業分析失敗：{e}")
+            result["industry"] = {"completed": True, "score": 0, "analysis": f"產業分析失敗: {str(e)}"}
+    
+    # 市場情緒分析線程
+    def run_sentiment():
+        try:
+            score, analysis = analyze_market_sentiment(stock_code)
+            result["market_sentiment"] = {"completed": True, "score": score, "analysis": analysis}
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ 市場情緒分析失敗：{e}")
+            result["market_sentiment"] = {"completed": True, "score": 0, "analysis": f"市場情緒分析失敗: {str(e)}"}
+    
+    # 創建並啟動所有線程
+    threads.append(threading.Thread(target=run_technical))
+    threads.append(threading.Thread(target=run_fundamental))
+    threads.append(threading.Thread(target=run_industry))
+    threads.append(threading.Thread(target=run_sentiment))
+    
+    for t in threads:
+        t.daemon = True
+        t.start()
+    
+    # 等待線程完成或超時
+    timeout = 10  # 每個分析最多等待 10 秒
+    for t in threads:
+        t.join(timeout)
+    
+    # 獲取各維度分析結果
+    technical_score = result["technical"]["score"]
+    technical_analysis = result["technical"]["analysis"]
+    
+    fundamental_score = result["fundamental"]["score"]
+    fundamental_analysis = result["fundamental"]["analysis"]
+    
+    industry_score = result["industry"]["score"]
+    industry_analysis = result["industry"]["analysis"]
+    
+    sentiment_score = result["market_sentiment"]["score"]
+    sentiment_analysis = result["market_sentiment"]["analysis"]
     
     # 計算綜合評分
     total_score = (
@@ -524,10 +575,10 @@ def analyze_market_sentiment(stock_code):
             rs_text = f"個股略強於大盤 {relative_strength:.1f}%"
         elif relative_strength < -5:  # 明顯弱於大盤
             sentiment_score -= 20
-            rs_text = f"個股弱於大盤 {relative_strength:.1f}%"
+            rs_text = f"個股弱於大盤 {abs(relative_strength):.1f}%"
         elif relative_strength < 0:  # 略弱於大盤
             sentiment_score -= 10
-            rs_text = f"個股略弱於大盤 {relative_strength:.1f}%"
+            rs_text = f"個股略弱於大盤 {abs(relative_strength):.1f}%"
         else:
             rs_text = "個股表現與大盤相當"
         
