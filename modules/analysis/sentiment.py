@@ -38,8 +38,8 @@ def get_market_sentiment_score():
             if len(closes) < 2:
                 raise ValueError("資料不足")
                 
-            last_close = float(closes.iloc[-1])
-            prev_close = float(closes.iloc[-2])
+            last_close = float(closes.iloc[-1].iloc[0]) if isinstance(closes.iloc[-1], pd.Series) else float(closes.iloc[-1])
+            prev_close = float(closes.iloc[-2].iloc[0]) if isinstance(closes.iloc[-2], pd.Series) else float(closes.iloc[-2])
             pct_change = (last_close - prev_close) / prev_close
 
             # 根據漲跌幅度給分
