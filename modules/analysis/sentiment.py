@@ -1,11 +1,11 @@
 """
 市場情緒分析模組 - 整合 market_sentiment.py
-修正版本 - 新增 pandas 導入並修復 FutureWarning
+修正版本 - 修復 FutureWarning 問題
 """
 print("[sentiment] ✅ 已載入最新版")
 
 import yfinance as yf
-import pandas as pd  # 修正：添加 pandas 導入
+import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
@@ -48,9 +48,15 @@ def get_market_sentiment_score():
                 print(f"[sentiment] ⚠️ {symbol} 收盤價資料不足")
                 continue
                 
-            # 修正：安全處理 pandas Series
-            last_close = float(closes.iloc[-1]) if isinstance(closes.iloc[-1], pd.Series) else closes.iloc[-1]
-            prev_close = float(closes.iloc[-2]) if isinstance(closes.iloc[-2], pd.Series) else closes.iloc[-2]
+            # 修正：使用安全的方式處理 pandas Series
+            last_close = closes.iloc[-1]
+            prev_close = closes.iloc[-2]
+            
+            # 如果返回的是 Series，取第一個元素
+            if isinstance(last_close, pd.Series):
+                last_close = last_close.iloc[0]
+            if isinstance(prev_close, pd.Series):
+                prev_close = prev_close.iloc[0]
             
             pct_change = (last_close - prev_close) / prev_close
             valid_indices += 1  # 成功讀取一個指數
@@ -150,12 +156,22 @@ def analyze_relative_strength(stock_code):
         if twii_history.empty or len(twii_history) < 20:
             return 0, "無法取得台股加權指數數據"
             
-        # 修正：安全處理 pandas Series
-        stock_close_20 = float(history['Close'].iloc[-20]) if isinstance(history['Close'].iloc[-20], pd.Series) else history['Close'].iloc[-20]
-        stock_close_now = float(history['Close'].iloc[-1]) if isinstance(history['Close'].iloc[-1], pd.Series) else history['Close'].iloc[-1]
+        # 修正：安全地取得資料
+        stock_close_20 = history['Close'].iloc[-20]
+        stock_close_now = history['Close'].iloc[-1]
         
-        twii_close_20 = float(twii_history['Close'].iloc[-20]) if isinstance(twii_history['Close'].iloc[-20], pd.Series) else twii_history['Close'].iloc[-20]
-        twii_close_now = float(twii_history['Close'].iloc[-1]) if isinstance(twii_history['Close'].iloc[-1], pd.Series) else twii_history['Close'].iloc[-1]
+        twii_close_20 = twii_history['Close'].iloc[-20]
+        twii_close_now = twii_history['Close'].iloc[-1]
+        
+        # 如果是 Series，取第一個元素
+        if isinstance(stock_close_20, pd.Series):
+            stock_close_20 = stock_close_20.iloc[0]
+        if isinstance(stock_close_now, pd.Series):
+            stock_close_now = stock_close_now.iloc[0]
+        if isinstance(twii_close_20, pd.Series):
+            twii_close_20 = twii_close_20.iloc[0]
+        if isinstance(twii_close_now, pd.Series):
+            twii_close_now = twii_close_now.iloc[0]
         
         # 計算漲跌幅
         stock_change = (stock_close_now / stock_close_20 - 1) * 100
@@ -206,6 +222,12 @@ def analyze_fund_flow(stock_code, days=5):
         # 計算最近幾天和之前幾天的平均成交量
         recent_vol = history['Volume'].tail(days).mean()
         prev_vol = history['Volume'].iloc[-2*days:-days].mean()
+        
+        # 如果是 Series，取第一個元素
+        if isinstance(recent_vol, pd.Series):
+            recent_vol = recent_vol.iloc[0]
+        if isinstance(prev_vol, pd.Series):
+            prev_vol = prev_vol.iloc[0]
         
         if prev_vol == 0:
             return 0, "無法計算成交量變化"
