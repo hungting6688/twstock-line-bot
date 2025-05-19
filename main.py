@@ -7,6 +7,8 @@ import os
 import sys
 import argparse
 from datetime import datetime, timedelta
+import threading
+import time
 
 
 # 引入通知報告模組
@@ -51,15 +53,48 @@ parser = argparse.ArgumentParser(description='twstock-line-bot')
 parser.add_argument('--mode', type=str, choices=['opening', 'intraday', 'dividend', 'closing', 'morning', 'noon', 'afternoon', 'evening'], help='指定執行模式')
 parser.add_argument('--check', action='store_true', help='檢查系統環境')
 parser.add_argument('--clear-cache', action='store_true', help='清理過期緩存')
+parser.add_argument('--debug', action='store_true', help='調試模式')
 args = parser.parse_args()
+
+# 如果指定了調試模式，設置環境變量
+if args.debug:
+    os.environ["DEBUG"] = "1"
+    print("[main] ⚠️ 已啟用調試模式")
 
 # 定義四個時段的推播功能
 def morning_push():
     """早盤前推播 (9:00)"""
     print("[main] ⏳ 執行早盤前推播...")
     try:
-        stocks = get_stock_recommendations('morning')  # 獲取6檔推薦股票
-        weak_valleys = get_weak_valley_alerts(2)  # 獲取2檔極弱谷股票
+        # 添加超時控制
+        result = {"stocks": None, "weak_valleys": None, "completed": False}
+        
+        def run_recommendations():
+            try:
+                result["stocks"] = get_stock_recommendations('morning')
+                result["weak_valleys"] = get_weak_valley_alerts(2)
+                result["completed"] = True
+            except Exception as e:
+                print(f"[main] ⚠️ 推薦分析過程中出錯：{e}")
+        
+        # 創建並啟動線程
+        t = threading.Thread(target=run_recommendations)
+        t.daemon = True
+        t.start()
+        
+        # 等待線程完成或超時（60秒）
+        max_wait = 60
+        waited = 0
+        while not result["completed"] and waited < max_wait:
+            time.sleep(5)
+            waited += 5
+            print(f"[main] 等待推薦結果... ({waited}/{max_wait}秒)")
+        
+        if not result["completed"]:
+            raise TimeoutError("推薦分析超時")
+        
+        stocks = result["stocks"]
+        weak_valleys = result["weak_valleys"]
         
         # 使用雙重通知系統
         send_stock_recommendations(stocks, "早盤前")
@@ -77,14 +112,41 @@ def noon_push():
     """中午休盤推播 (12:30)"""
     print("[main] ⏳ 執行中午休盤推播...")
     try:
-        stocks = get_stock_recommendations('noon')  # 獲取6檔推薦股票
-        weak_valleys = get_weak_valley_alerts(2)  # 獲取2檔極弱谷股票
+        # 添加超時控制
+        result = {"stocks": None, "weak_valleys": None, "completed": False}
+        
+        def run_recommendations():
+            try:
+                result["stocks"] = get_stock_recommendations('noon')
+                result["weak_valleys"] = get_weak_valley_alerts(2)
+                result["completed"] = True
+            except Exception as e:
+                print(f"[main] ⚠️ 推薦分析過程中出錯：{e}")
+        
+        # 創建並啟動線程
+        t = threading.Thread(target=run_recommendations)
+        t.daemon = True
+        t.start()
+        
+        # 等待線程完成或超時（60秒）
+        max_wait = 60
+        waited = 0
+        while not result["completed"] and waited < max_wait:
+            time.sleep(5)
+            waited += 5
+            print(f"[main] 等待推薦結果... ({waited}/{max_wait}秒)")
+        
+        if not result["completed"]:
+            raise TimeoutError("推薦分析超時")
+        
+        stocks = result["stocks"]
+        weak_valleys = result["weak_valleys"]
         
         # 使用雙重通知系統
         send_stock_recommendations(stocks, "中午休盤時")
         if weak_valleys:
             send_weak_valley_alerts(weak_valleys)
-        
+            
         print("[main] ✅ 中午休盤推播完成")
     except Exception as e:
         error_message = f"[main] ❌ 中午休盤推播失敗：{e}"
@@ -96,14 +158,41 @@ def afternoon_push():
     """尾盤前推播 (13:00)"""
     print("[main] ⏳ 執行尾盤前推播...")
     try:
-        stocks = get_stock_recommendations('afternoon')  # 獲取6檔推薦股票
-        weak_valleys = get_weak_valley_alerts(2)  # 獲取2檔極弱谷股票
+        # 添加超時控制
+        result = {"stocks": None, "weak_valleys": None, "completed": False}
+        
+        def run_recommendations():
+            try:
+                result["stocks"] = get_stock_recommendations('afternoon')
+                result["weak_valleys"] = get_weak_valley_alerts(2)
+                result["completed"] = True
+            except Exception as e:
+                print(f"[main] ⚠️ 推薦分析過程中出錯：{e}")
+        
+        # 創建並啟動線程
+        t = threading.Thread(target=run_recommendations)
+        t.daemon = True
+        t.start()
+        
+        # 等待線程完成或超時（60秒）
+        max_wait = 60
+        waited = 0
+        while not result["completed"] and waited < max_wait:
+            time.sleep(5)
+            waited += 5
+            print(f"[main] 等待推薦結果... ({waited}/{max_wait}秒)")
+        
+        if not result["completed"]:
+            raise TimeoutError("推薦分析超時")
+        
+        stocks = result["stocks"]
+        weak_valleys = result["weak_valleys"]
         
         # 使用雙重通知系統
         send_stock_recommendations(stocks, "尾盤前")
         if weak_valleys:
             send_weak_valley_alerts(weak_valleys)
-        
+            
         print("[main] ✅ 尾盤前推播完成")
     except Exception as e:
         error_message = f"[main] ❌ 尾盤前推播失敗：{e}"
@@ -115,7 +204,33 @@ def evening_push():
     """盤後分析推播 (15:00)"""
     print("[main] ⏳ 執行盤後分析推播...")
     try:
-        stocks = get_stock_recommendations('evening')  # 獲取10檔推薦股票
+        # 添加超時控制
+        result = {"stocks": None, "completed": False}
+        
+        def run_recommendations():
+            try:
+                result["stocks"] = get_stock_recommendations('evening')
+                result["completed"] = True
+            except Exception as e:
+                print(f"[main] ⚠️ 推薦分析過程中出錯：{e}")
+        
+        # 創建並啟動線程
+        t = threading.Thread(target=run_recommendations)
+        t.daemon = True
+        t.start()
+        
+        # 等待線程完成或超時（60秒）
+        max_wait = 60
+        waited = 0
+        while not result["completed"] and waited < max_wait:
+            time.sleep(5)
+            waited += 5
+            print(f"[main] 等待推薦結果... ({waited}/{max_wait}秒)")
+        
+        if not result["completed"]:
+            raise TimeoutError("推薦分析超時")
+        
+        stocks = result["stocks"]
         
         # 使用雙重通知系統
         send_stock_recommendations(stocks, "盤後分析")
@@ -125,6 +240,7 @@ def evening_push():
         print(error_message)
         # 系統錯誤也通知用戶
         send_notification(error_message, "系統錯誤 - 盤後分析推播失敗")
+
 def check_system_environment():
     """檢查系統環境"""
     print("[main] 🔍 開始檢查系統環境...")
@@ -192,6 +308,11 @@ def is_trading_day():
     # 使用台灣時間判斷週末
     weekday = taiwan_today.weekday()
     print(f"[main] 台灣時間：{taiwan_today}，星期：{weekday}")
+    
+    # 調試模式：如果設置了 DEBUG 環境變量，則忽略交易日檢查
+    if os.getenv("DEBUG") == "1":
+        print("[main] ⚠️ 調試模式：忽略交易日檢查")
+        return True
     
     # 週末不是交易日
     if weekday >= 5:  # 5=週六, 6=週日
