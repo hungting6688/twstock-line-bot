@@ -4,6 +4,8 @@
 print("[sentiment] ✅ 已載入最新版")
 
 import yfinance as yf
+import pandas as pd  # 添加缺失的 pandas 導入
+import numpy as np
 from datetime import datetime, timedelta
 
 
@@ -28,19 +30,29 @@ def get_market_sentiment_score():
 
     score = 0
     max_score = len(indices) * 2  # 每個指數最高可得2分
+    valid_indices = 0  # 追踪成功讀取的指數數量
 
     # 分析每個指數的漲跌
     for symbol, name in indices.items():
         try:
             df = yf.download(symbol, start=start_date.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'), progress=False)
+            
+            if df.empty or len(df) < 2:
+                print(f"[sentiment] ⚠️ {symbol} 資料不足")
+                continue
+                
             closes = df["Close"].dropna()
             
             if len(closes) < 2:
-                raise ValueError("資料不足")
+                print(f"[sentiment] ⚠️ {symbol} 收盤價資料不足")
+                continue
                 
-            last_close = float(closes.iloc[-1].iloc[0]) if isinstance(closes.iloc[-1], pd.Series) else float(closes.iloc[-1])
-            prev_close = float(closes.iloc[-2].iloc[0]) if isinstance(closes.iloc[-2], pd.Series) else float(closes.iloc[-2])
+            # 修正 FutureWarning
+            last_close = float(closes.iloc[-1]) if isinstance(closes.iloc[-1], pd.Series) else closes.iloc[-1]
+            prev_close = float(closes.iloc[-2]) if isinstance(closes.iloc[-2], pd.Series) else closes.iloc[-2]
+            
             pct_change = (last_close - prev_close) / prev_close
+            valid_indices += 1  # 成功讀取一個指數
 
             # 根據漲跌幅度給分
             if pct_change > 0.01:  # 漲幅超過1%
@@ -52,8 +64,12 @@ def get_market_sentiment_score():
             print(f"[sentiment] ❌ 無法讀取 {symbol}：{e}")
             continue
 
-    # 轉換為0-10的評分
-    normalized_score = round((score / max_score) * 10, 1)
+    # 轉換為0-10的評分，並處理沒有任何有效指數的情況
+    if valid_indices > 0:
+        normalized_score = round((score / (valid_indices * 2)) * 10, 1)
+    else:
+        normalized_score = 5.0  # 如果沒有有效指數，給出中性評分
+    
     print(f"[sentiment] ✅ 市場情緒評分：{normalized_score}/10")
     
     return normalized_score
@@ -133,9 +149,16 @@ def analyze_relative_strength(stock_code):
         if twii_history.empty or len(twii_history) < 20:
             return 0, "無法取得台股加權指數數據"
             
+        # 取得收盤價，並修正可能的 Series 類型錯誤
+        stock_close_20 = float(history['Close'].iloc[-20]) if isinstance(history['Close'].iloc[-20], pd.Series) else history['Close'].iloc[-20]
+        stock_close_now = float(history['Close'].iloc[-1]) if isinstance(history['Close'].iloc[-1], pd.Series) else history['Close'].iloc[-1]
+        
+        twii_close_20 = float(twii_history['Close'].iloc[-20]) if isinstance(twii_history['Close'].iloc[-20], pd.Series) else twii_history['Close'].iloc[-20]
+        twii_close_now = float(twii_history['Close'].iloc[-1]) if isinstance(twii_history['Close'].iloc[-1], pd.Series) else twii_history['Close'].iloc[-1]
+        
         # 計算漲跌幅
-        stock_change = (history['Close'].iloc[-1] / history['Close'].iloc[-20] - 1) * 100
-        market_change = (twii_history['Close'].iloc[-1] / twii_history['Close'].iloc[-20] - 1) * 100
+        stock_change = (stock_close_now / stock_close_20 - 1) * 100
+        market_change = (twii_close_now / twii_close_20 - 1) * 100
         
         # 計算相對強度
         relative_strength = stock_change - market_change
