@@ -1,3 +1,7 @@
+"""
+多重分析模組 - 整合多種技術和基本面分析方法來評估股票
+"""
+
 print("[multi_analysis] ✅ 已載入最新版")
 
 import numpy as np
@@ -5,6 +9,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import yfinance as yf
+import time
 
 def analyze_stock_value(stock_code):
     """
@@ -73,7 +78,7 @@ def analyze_stock_value(stock_code):
     return total_score, analysis
 
 def analyze_technical(stock_code):
-    """技術面分析"""
+    """技術面分析，增加錯誤處理和空值檢查"""
     # 使用 yfinance 取得股價資料
     try:
         ticker = yf.Ticker(f"{stock_code}.TW")
@@ -82,41 +87,65 @@ def analyze_technical(stock_code):
         if history.empty or len(history) < 30:
             return 0, "歷史資料不足"
         
-        # 提取收盤價和成交量
+        # 提取收盤價和成交量並進行檢查
+        if 'Close' not in history.columns:
+            return 0, "無收盤價資料"
+            
         closes = history['Close'].values
+        if len(closes) < 30:
+            return 0, "收盤價資料不足"
+            
         volumes = history['Volume'].values if 'Volume' in history.columns else np.zeros(len(closes))
         
-        # 計算技術指標
+        # 計算技術指標前先檢查數據
+        if len(closes) < 60:
+            # 確保有足夠的資料長度
+            padding = np.zeros(60 - len(closes))
+            closes = np.concatenate([padding, closes])
+            volumes = np.concatenate([padding, volumes])
+        
         # 1. 移動平均線
         ma_5 = np.mean(closes[-5:])
         ma_10 = np.mean(closes[-10:])
         ma_20 = np.mean(closes[-20:])
-        ma_60 = np.mean(closes[-60:]) if len(closes) >= 60 else np.mean(closes)
+        ma_60 = np.mean(closes[-60:])
         
-        # 2. MACD
-        ema_12 = calculate_ema(closes, 12)
-        ema_26 = calculate_ema(closes, 26)
-        macd_line = ema_12 - ema_26
-        signal_line = calculate_ema([macd_line], 9)[0]
-        macd_histogram = macd_line - signal_line
+        # 2. MACD - 使用安全的 calculate_ema 函數
+        try:
+            ema_12 = calculate_ema(closes, 12)
+            ema_26 = calculate_ema(closes, 26)
+            macd_line = ema_12 - ema_26
+            signal_line = calculate_ema(np.array([macd_line]), 9)[0]  # 確保是 numpy array
+            macd_histogram = macd_line - signal_line
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ MACD 計算錯誤：{e}")
+            ema_12 = ema_26 = macd_line = signal_line = macd_histogram = 0
         
-        # 3. RSI
-        delta = np.diff(closes)
-        up_values = np.array([max(d, 0) for d in delta[-14:]])
-        down_values = np.array([abs(min(d, 0)) for d in delta[-14:]])
+        # 3. RSI - 添加更多的安全檢查
+        try:
+            delta = np.diff(closes)
+            up_values = np.array([max(d, 0) for d in delta[-14:]])
+            down_values = np.array([abs(min(d, 0)) for d in delta[-14:]])
+            
+            up_avg = np.mean(up_values) if len(up_values) > 0 else 0
+            down_avg = np.mean(down_values) if len(down_values) > 0 else 1e-10
+            
+            rs = up_avg / down_avg if down_avg > 0 else 999
+            rsi = 100 - (100 / (1 + rs))
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ RSI 計算錯誤：{e}")
+            rsi = 50  # 使用中性值作為默認值
         
-        up_avg = np.mean(up_values) if len(up_values) > 0 else 0
-        down_avg = np.mean(down_values) if len(down_values) > 0 else 1e-10
-        
-        rs = up_avg / down_avg if down_avg > 0 else 999
-        rsi = 100 - (100 / (1 + rs))
-        
-        # 4. 成交量變化
-        if len(volumes) >= 20 and np.mean(volumes[-20:]) > 0:
-            avg_vol_5 = np.mean(volumes[-5:])
-            avg_vol_20 = np.mean(volumes[-20:])
-            vol_change = avg_vol_5 / avg_vol_20
-        else:
+        # 4. 成交量變化 - 添加安全檢查
+        try:
+            if len(volumes) >= 20 and np.mean(volumes[-20:]) > 0:
+                avg_vol_5 = np.mean(volumes[-5:])
+                avg_vol_20 = np.mean(volumes[-20:])
+                vol_change = avg_vol_5 / avg_vol_20
+            else:
+                vol_change = 1
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ 成交量變化計算錯誤：{e}")
             vol_change = 1
         
         # 計算技術面得分
@@ -125,58 +154,74 @@ def analyze_technical(stock_code):
         
         # MA評分 (30分)
         ma_score = 0
-        # 短期均線多頭排列
-        if ma_5 > ma_10 > ma_20:
-            ma_score += 15
-            analysis_points.append("短期均線呈多頭排列")
-        # 價格站上主要均線
-        if closes[-1] > ma_20:
-            ma_score += 10
-            analysis_points.append("價格站上20日均線")
-        if closes[-1] > ma_60:
-            ma_score += 5
-            analysis_points.append("價格站上60日均線")
+        try:
+            # 短期均線多頭排列
+            if ma_5 > ma_10 > ma_20:
+                ma_score += 15
+                analysis_points.append("短期均線呈多頭排列")
+            # 價格站上主要均線
+            if closes[-1] > ma_20:
+                ma_score += 10
+                analysis_points.append("價格站上20日均線")
+            if closes[-1] > ma_60:
+                ma_score += 5
+                analysis_points.append("價格站上60日均線")
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ MA 評分計算錯誤：{e}")
+        
         score += ma_score
         
-        # MACD評分 (25分)
+        # MACD評分 (25分) - 添加安全檢查
         macd_score = 0
-        if macd_line > signal_line:
-            macd_score += 15
-            analysis_points.append("MACD位於信號線上方")
-        if macd_line > 0:
-            macd_score += 5
-            analysis_points.append("MACD位於零軸上方")
-        if macd_histogram > 0 and len(closes) > 2:
-            prev_histogram = ema_12 - ema_26 - signal_line
-            if macd_histogram > prev_histogram:
+        try:
+            if macd_line > signal_line:
+                macd_score += 15
+                analysis_points.append("MACD位於信號線上方")
+            if macd_line > 0:
                 macd_score += 5
-                analysis_points.append("MACD柱狀圖擴張中")
+                analysis_points.append("MACD位於零軸上方")
+            if macd_histogram > 0 and len(closes) > 2:
+                prev_histogram = ema_12 - ema_26 - signal_line
+                if macd_histogram > prev_histogram:
+                    macd_score += 5
+                    analysis_points.append("MACD柱狀圖擴張中")
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ MACD 評分計算錯誤：{e}")
+            
         score += macd_score
         
-        # RSI評分 (25分)
+        # RSI評分 (25分) - 添加安全檢查
         rsi_score = 0
-        if 40 <= rsi <= 70:
-            rsi_score += 15
-            analysis_points.append(f"RSI={rsi:.1f}處於理想區間")
-        elif 30 <= rsi < 40:
-            rsi_score += 10
-            analysis_points.append(f"RSI={rsi:.1f}接近超賣區間")
-        elif 70 < rsi <= 80:
-            rsi_score += 5
-            analysis_points.append(f"RSI={rsi:.1f}接近超買區間")
+        try:
+            if 40 <= rsi <= 70:
+                rsi_score += 15
+                analysis_points.append(f"RSI={rsi:.1f}處於理想區間")
+            elif 30 <= rsi < 40:
+                rsi_score += 10
+                analysis_points.append(f"RSI={rsi:.1f}接近超賣區間")
+            elif 70 < rsi <= 80:
+                rsi_score += 5
+                analysis_points.append(f"RSI={rsi:.1f}接近超買區間")
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ RSI 評分計算錯誤：{e}")
+            
         score += rsi_score
         
-        # 成交量評分 (20分)
+        # 成交量評分 (20分) - 添加安全檢查
         vol_score = 0
-        if vol_change > 1.5:
-            vol_score += 20
-            analysis_points.append("成交量明顯放大")
-        elif vol_change > 1.2:
-            vol_score += 15
-            analysis_points.append("成交量溫和增加")
-        elif vol_change > 0.8:
-            vol_score += 10
-            analysis_points.append("成交量穩定")
+        try:
+            if vol_change > 1.5:
+                vol_score += 20
+                analysis_points.append("成交量明顯放大")
+            elif vol_change > 1.2:
+                vol_score += 15
+                analysis_points.append("成交量溫和增加")
+            elif vol_change > 0.8:
+                vol_score += 10
+                analysis_points.append("成交量穩定")
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ 成交量評分計算錯誤：{e}")
+            
         score += vol_score
         
         # 生成分析文字
@@ -191,37 +236,67 @@ def analyze_technical(stock_code):
         return 0, f"技術分析失敗: {str(e)}"
 
 def calculate_ema(prices, days):
-    """計算指數移動平均線"""
-    if len(prices) < days:
-        return np.mean(prices)
+    """
+    計算指數移動平均線，增加更多安全檢查
+    """
+    try:
+        prices = np.array(prices)  # 確保輸入是 numpy array
         
-    multiplier = 2 / (days + 1)
-    ema_values = [np.mean(prices[:days])]
-    
-    for i in range(days, len(prices)):
-        ema_values.append((prices[i] - ema_values[-1]) * multiplier + ema_values[-1])
-    
-    return ema_values[-1]
+        if len(prices) < days:
+            return np.mean(prices)
+            
+        # 使用更安全的 EMA 計算方法
+        multiplier = 2 / (days + 1)
+        ema_values = [np.mean(prices[:days])]
+        
+        for i in range(days, len(prices)):
+            # 檢查是否為有效數值
+            if np.isnan(prices[i]) or np.isnan(ema_values[-1]):
+                ema_values.append(ema_values[-1])  # 用前一個值填充
+            else:
+                ema_values.append((prices[i] - ema_values[-1]) * multiplier + ema_values[-1])
+        
+        return ema_values[-1]
+    except Exception as e:
+        print(f"[multi_analysis] ⚠️ EMA 計算錯誤：{e}")
+        return 0.0  # 返回安全的默認值
 
 def analyze_fundamental(stock_code):
     """基本面分析"""
     try:
-        # 使用現有模組獲取基本面資料
-        from modules.data.scraper import get_eps_data
-        eps_data = get_eps_data()
+        # 增加重試機制避免 Too Many Requests 錯誤
+        max_retries = 3
+        retry_delay = 5
         
-        # 從 Yahoo Finance 獲取其他基本面數據
-        ticker = yf.Ticker(f"{stock_code}.TW")
-        info = ticker.info
-        
-        # 從自有資料獲取 EPS 和股息資料
-        stock_eps_data = eps_data.get(stock_code, {})
-        eps = stock_eps_data.get('eps', None)
-        dividend = stock_eps_data.get('dividend', None)
-        
-        # 從 Yahoo Finance 獲取本益比、淨值比
-        pe_ratio = info.get('trailingPE', None)
-        pb_ratio = info.get('priceToBook', None)
+        for attempt in range(max_retries):
+            try:
+                # 使用現有模組獲取基本面資料
+                from modules.data.scraper import get_eps_data
+                eps_data = get_eps_data()
+                
+                # 從 Yahoo Finance 獲取其他基本面數據
+                ticker = yf.Ticker(f"{stock_code}.TW")
+                info = ticker.info
+                
+                # 從自有資料獲取 EPS 和股息資料
+                stock_eps_data = eps_data.get(stock_code, {})
+                eps = stock_eps_data.get('eps', None)
+                dividend = stock_eps_data.get('dividend', None)
+                
+                # 從 Yahoo Finance 獲取本益比、淨值比
+                pe_ratio = info.get('trailingPE', None)
+                pb_ratio = info.get('priceToBook', None)
+                
+                # 成功獲取數據，跳出重試循環
+                break
+                
+            except Exception as e:
+                if "Too Many Requests" in str(e) and attempt < max_retries - 1:
+                    print(f"[multi_analysis] ⚠️ Yahoo Finance 速率限制，等待 {retry_delay} 秒後重試...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 增加等待時間
+                else:
+                    raise
         
         # 計算基本面得分
         score = 0
@@ -376,23 +451,33 @@ def analyze_market_sentiment(stock_code):
             
             if not twii_history.empty and len(twii_history) >= 20:
                 # 計算近20天的表現
-                stock_change = (history['Close'].iloc[-1] / history['Close'].iloc[-20] - 1) * 100
-                market_change = (twii_history['Close'].iloc[-1] / twii_history['Close'].iloc[-20] - 1) * 100
+                # 修正 FutureWarning 問題
+                stock_last = float(history['Close'].iloc[-1]) if isinstance(history['Close'].iloc[-1], pd.Series) else history['Close'].iloc[-1]
+                stock_prev = float(history['Close'].iloc[-20]) if isinstance(history['Close'].iloc[-20], pd.Series) else history['Close'].iloc[-20]
+                market_last = float(twii_history['Close'].iloc[-1]) if isinstance(twii_history['Close'].iloc[-1], pd.Series) else twii_history['Close'].iloc[-1]
+                market_prev = float(twii_history['Close'].iloc[-20]) if isinstance(twii_history['Close'].iloc[-20], pd.Series) else twii_history['Close'].iloc[-20]
+                
+                stock_change = (stock_last / stock_prev - 1) * 100
+                market_change = (market_last / market_prev - 1) * 100
                 
                 # 相對強度
                 relative_strength = stock_change - market_change
             else:
                 relative_strength = 0
-        except:
+        except Exception as e:
+            print(f"[multi_analysis] ⚠️ 相對強度計算錯誤：{e}")
             relative_strength = 0
         
         # 3. 計算資金流向
         volume_change = 0
         if 'Volume' in history.columns and len(history) >= 10:
-            recent_vol = history['Volume'].tail(5).mean()
-            prev_vol = history['Volume'].iloc[-10:-5].mean()
-            if prev_vol > 0:
-                volume_change = (recent_vol / prev_vol - 1) * 100
+            try:
+                recent_vol = history['Volume'].tail(5).mean()
+                prev_vol = history['Volume'].iloc[-10:-5].mean()
+                if prev_vol > 0:
+                    volume_change = (recent_vol / prev_vol - 1) * 100
+            except Exception as e:
+                print(f"[multi_analysis] ⚠️ 資金流向計算錯誤：{e}")
         
         # 4. 計算情緒得分 (0-100)
         sentiment_score = min(100, max(0, market_score * 10))  # 市場情緒 (0-100)
