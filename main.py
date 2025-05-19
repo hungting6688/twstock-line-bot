@@ -82,8 +82,8 @@ def morning_push():
         t.daemon = True
         t.start()
         
-        # 等待線程完成或超時（60秒）
-        max_wait = 60
+        # 等待線程完成或超時（180秒，原為60秒）
+        max_wait = 180
         waited = 0
         while not result["completed"] and waited < max_wait:
             time.sleep(5)
@@ -128,8 +128,8 @@ def noon_push():
         t.daemon = True
         t.start()
         
-        # 等待線程完成或超時（60秒）
-        max_wait = 60
+        # 等待線程完成或超時（180秒，原為60秒）
+        max_wait = 180
         waited = 0
         while not result["completed"] and waited < max_wait:
             time.sleep(5)
@@ -174,8 +174,8 @@ def afternoon_push():
         t.daemon = True
         t.start()
         
-        # 等待線程完成或超時（60秒）
-        max_wait = 60
+        # 等待線程完成或超時（180秒，原為60秒）
+        max_wait = 180
         waited = 0
         while not result["completed"] and waited < max_wait:
             time.sleep(5)
@@ -219,8 +219,8 @@ def evening_push():
         t.daemon = True
         t.start()
         
-        # 等待線程完成或超時（60秒）
-        max_wait = 60
+        # 等待線程完成或超時（180秒，原為60秒）
+        max_wait = 180
         waited = 0
         while not result["completed"] and waited < max_wait:
             time.sleep(5)
