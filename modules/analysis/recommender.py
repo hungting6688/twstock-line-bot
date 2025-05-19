@@ -60,94 +60,120 @@ class StockRecommender:
         return strategy_func(count) if strategy_func else []
 
     @staticmethod
-    def _morning_strategy(count):
-        """早盤前推薦策略"""
-        # 掃描100檔股票
-        scan_limit = 100
-        
-        # 獲取活躍股票
-        top_stocks = get_top_stocks(limit=scan_limit)
-        
-        print(f"[stock_recommender] 分析早盤技術指標與基本面 (掃描{scan_limit}檔股票)...")
-        
-        candidates = []
-        for stock_id in top_stocks:
+    @staticmethod
+def _morning_strategy(count):
+    """早盤前推薦策略"""
+    # 掃描限制
+    scan_limit = 100
+    
+    # 獲取活躍股票 - 只執行一次
+    print(f"[stock_recommender] 獲取前{scan_limit}檔熱門股票...")
+    top_stocks = get_top_stocks(limit=scan_limit)
+    
+    print(f"[stock_recommender] 分析早盤技術指標與基本面...")
+    
+    # 預先獲取 EPS 數據，避免每支股票都重新獲取
+    try:
+        from modules.data.scraper import get_eps_data
+        print("[stock_recommender] 一次性獲取 EPS 數據...")
+        eps_data = get_eps_data()
+    except Exception as e:
+        print(f"[stock_recommender] ⚠️ 獲取 EPS 數據失敗: {e}")
+        eps_data = {}
+    
+    candidates = []
+    for stock_id in top_stocks:
+        try:
+            # 添加超時控制
+            result = {"completed": False, "score": 0, "analysis": None}
+            
+            def analyze():
+                try:
+                    score, analysis = analyze_stock_value(stock_id)
+                    result["score"] = score
+                    result["analysis"] = analysis
+                    result["completed"] = True
+                except Exception as e:
+                    print(f"[stock_recommender] ⚠️ {stock_id} 分析失敗: {e}")
+            
+            # 創建並啟動線程
+            t = threading.Thread(target=analyze)
+            t.daemon = True
+            t.start()
+            
+            # 等待分析完成或超時 (5秒)
+            t.join(5)
+            
+            if not result["completed"]:
+                print(f"[stock_recommender] ⚠️ {stock_id} 分析超時")
+                continue
+            
+            score = result["score"]
+            analysis = result["analysis"]
+            
+            # 獲取股票名稱 - 優先使用緩存的資料
+            name = stock_id
             try:
-                # 添加超時控制
-                result = {"completed": False, "score": 0, "analysis": None}
+                if eps_data and stock_id in eps_data:
+                    # 如果有資料，嘗試獲取名稱
+                    # 這裡假設沒有名稱資訊，僅作為範例
+                    pass
+                else:
+                    # 否則使用 yfinance 獲取名稱
+                    ticker = yf.Ticker(f"{stock_id}.TW")
+                    info = ticker.info
+                    name = info.get('shortName', stock_id)
+            except Exception:
+                name = stock_id  # 如果獲取失敗，使用代號
+            
+            if score > 40:  # 降低分數門檻，確保有足夠的候選股票
+                candidates.append({
+                    'code': stock_id,
+                    'name': name,
+                    'score': score,
+                    'analysis': analysis
+                })
                 
-                def analyze():
-                    try:
-                        score, analysis = analyze_stock_value(stock_id)
-                        result["score"] = score
-                        result["analysis"] = analysis
-                        result["completed"] = True
-                    except Exception as e:
-                        print(f"[stock_recommender] ⚠️ {stock_id} 分析失敗: {e}")
+                # 當候選股票數達到 count*2 時，停止分析
+                if len(candidates) >= count * 2:
+                    print(f"[stock_recommender] 已獲取足夠候選股票 ({len(candidates)}檔)，停止分析")
+                    break
+        except Exception as e:
+            print(f"[stock_recommender] ⚠️ {stock_id} 處理失敗：{e}")
+    
+    # 根據分數排序並選出前N名
+    candidates.sort(key=lambda x: x['score'], reverse=True)
+    top_candidates = candidates[:count]
+    
+    recommendations = []
+    for candidate in top_candidates:
+        try:
+            ticker = yf.Ticker(f"{candidate['code']}.TW")
+            history = ticker.history(period="1mo")
+            
+            if not history.empty:
+                current_price = history['Close'].iloc[-1]
+                ma_5 = history['Close'].tail(5).mean()
+                ma_10 = history['Close'].tail(10).mean()
                 
-                # 創建並啟動線程
-                t = threading.Thread(target=analyze)
-                t.daemon = True
-                t.start()
+                target_price = round(current_price * 1.05, 2)  # 目標漲幅5%
+                stop_loss = round(current_price * 0.97, 2)    # 止損點3%
                 
-                # 等待分析完成或超時 (5秒)
-                t.join(5)
+                reason = f"技術面：{candidate['analysis'].get('technical', '無技術分析')}，"
+                reason += f"基本面：{candidate['analysis'].get('fundamental', '無基本面分析')}"
                 
-                if not result["completed"]:
-                    print(f"[stock_recommender] ⚠️ {stock_id} 分析超時")
-                    continue
-                
-                score = result["score"]
-                analysis = result["analysis"]
-                
-                # 獲取股票名稱
-                ticker = yf.Ticker(f"{stock_id}.TW")
-                info = ticker.info
-                name = info.get('shortName', stock_id)
-                
-                if score > 70:  # 分數門檻
-                    candidates.append({
-                        'code': stock_id,
-                        'name': name,
-                        'score': score,
-                        'analysis': analysis
-                    })
-            except Exception as e:
-                print(f"[stock_recommender] ⚠️ {stock_id} 處理失敗：{e}")
-        
-        # 根據分數排序並選出前N名
-        candidates.sort(key=lambda x: x['score'], reverse=True)
-        top_candidates = candidates[:count]
-        
-        recommendations = []
-        for candidate in top_candidates:
-            try:
-                ticker = yf.Ticker(f"{candidate['code']}.TW")
-                history = ticker.history(period="1mo")
-                
-                if not history.empty:
-                    current_price = history['Close'].iloc[-1]
-                    ma_5 = history['Close'].tail(5).mean()
-                    ma_10 = history['Close'].tail(10).mean()
-                    
-                    target_price = round(current_price * 1.05, 2)  # 目標漲幅5%
-                    stop_loss = round(current_price * 0.97, 2)    # 止損點3%
-                    
-                    reason = f"技術面：{candidate['analysis'].get('technical', '無技術分析')}，"
-                    reason += f"基本面：{candidate['analysis'].get('fundamental', '無基本面分析')}"
-                    
-                    recommendations.append({
-                        'code': candidate['code'],
-                        'name': candidate['name'],
-                        'reason': reason,
-                        'target_price': target_price,
-                        'stop_loss': stop_loss,
-                        'current_price': current_price
-                    })
-            except Exception as e:
-                print(f"[stock_recommender] ⚠️ {candidate['code']} 處理失敗：{e}")
-        
-        return recommendations
+                recommendations.append({
+                    'code': candidate['code'],
+                    'name': candidate['name'],
+                    'reason': reason,
+                    'target_price': target_price,
+                    'stop_loss': stop_loss,
+                    'current_price': current_price
+                })
+        except Exception as e:
+            print(f"[stock_recommender] ⚠️ {candidate['code']} 處理失敗：{e}")
+    
+    return recommendations
 
     @staticmethod
     def _noon_strategy(count):
