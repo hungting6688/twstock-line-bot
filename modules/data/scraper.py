@@ -549,7 +549,6 @@ def get_all_valid_twse_stocks_with_type(use_cache=True):
         
     return stocks
 
-
 def fetch_fundamental_data(stock_ids, max_stocks=20):
     """
     獲取基本面數據（PE, PB, ROE, 法人持股等）
@@ -626,7 +625,7 @@ def fetch_fundamental_data(stock_ids, max_stocks=20):
                     except:
                         roe = None
 
-           result.append({
+            result.append({
                 "證券代號": stock_id,
                 "PE": pe,
                 "PB": pb,
