@@ -224,11 +224,12 @@ def get_eps_data(use_cache=True, cache_expiry_hours=24):
     return result
 
 
-def get_all_valid_twse_stocks(use_cache=True, cache_expiry_hours=48):
+def get_all_valid_twse_stocks(limit=None, use_cache=True, cache_expiry_hours=48):
     """
     從證交所獲取所有有效的上市股票，增加緩存機制
     
     參數:
+    - limit: 限制返回的股票數量，None 表示不限制
     - use_cache: 是否使用緩存
     - cache_expiry_hours: 緩存有效時間（小時）
     
@@ -274,6 +275,12 @@ def get_all_valid_twse_stocks(use_cache=True, cache_expiry_hours=48):
                 print(f"[scraper] ⚠️ 獲取股票列表失敗 (嘗試 {attempt+1}/{max_attempts}): {e}")
                 if attempt < max_attempts - 1:
                     time.sleep(5 * (attempt + 1))
+                     # 在返回結果前增加限制檢查
+        if limit is not None and isinstance(limit, int) and limit > 0:
+        print(f"[scraper] 限制返回 {limit} 檔股票")
+        return all_stocks[:limit]
+    
+        return all_stocks
 
         # 解析數據
         tables = pd.read_html(StringIO(response.text))
