@@ -8,6 +8,7 @@ on:
 jobs:
   run-morning:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # 增加執行超時設定
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -24,6 +25,11 @@ jobs:
         run: |
           echo "Current time: $(date)"
           echo "Current day: $(date +%u)"  # 1=Mon, 7=Sun
+      - name: Test network connection
+        run: |
+          echo "測試網絡連接..."
+          ping -c 4 finance.yahoo.com || echo "ping 失敗但繼續執行"
+          curl -I https://finance.yahoo.com || echo "curl 失敗但繼續執行"
       - name: Run Morning Recommendations
         env:
           GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
@@ -33,5 +39,7 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+          YAHOO_FINANCE_RETRY_ATTEMPTS: "5"  # 增加重試次數的環境變數
+          YAHOO_FINANCE_BATCH_DELAY: "5"     # 批次間延遲的環境變數
           TZ: "Asia/Taipei"  # 設置環境變量
         run: python main.py --mode=morning
