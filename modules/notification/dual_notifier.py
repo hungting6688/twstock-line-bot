@@ -110,7 +110,7 @@ def send_stock_recommendations(stocks, time_slot):
         </style>
     </head>
     <body>
-        <div class="header">【{time_slot}推薦股票】</div>
+        <div class="header">【{time_slot}推薦股票】- 共 {len(stocks)} 檔</div>
     """
     
     for stock in stocks:
