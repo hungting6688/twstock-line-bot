@@ -12,6 +12,8 @@ import twstock
 import pandas as pd
 from datetime import datetime
 import yfinance as yf
+import threading
+import time
 
 from modules.multi_analysis import analyze_stock_value
 from modules.analysis.technical import analyze_technical_indicators
@@ -71,13 +73,38 @@ class StockRecommender:
         candidates = []
         for stock_id in top_stocks:
             try:
+                # 添加超時控制
+                result = {"completed": False, "score": 0, "analysis": None}
+                
+                def analyze():
+                    try:
+                        score, analysis = analyze_stock_value(stock_id)
+                        result["score"] = score
+                        result["analysis"] = analysis
+                        result["completed"] = True
+                    except Exception as e:
+                        print(f"[stock_recommender] ⚠️ {stock_id} 分析失敗: {e}")
+                
+                # 創建並啟動線程
+                t = threading.Thread(target=analyze)
+                t.daemon = True
+                t.start()
+                
+                # 等待分析完成或超時 (5秒)
+                t.join(5)
+                
+                if not result["completed"]:
+                    print(f"[stock_recommender] ⚠️ {stock_id} 分析超時")
+                    continue
+                
+                score = result["score"]
+                analysis = result["analysis"]
+                
                 # 獲取股票名稱
                 ticker = yf.Ticker(f"{stock_id}.TW")
                 info = ticker.info
                 name = info.get('shortName', stock_id)
                 
-                # 多重分析評分
-                score, analysis = analyze_stock_value(stock_id)
                 if score > 70:  # 分數門檻
                     candidates.append({
                         'code': stock_id,
@@ -298,10 +325,12 @@ class StockRecommender:
         """
         print("[stock_recommender] ⏳ 掃描極弱谷股票...")
         
-        stock_ids = get_top_stocks(limit=300)  # 從前300檔中尋找極弱谷股票
+        # 從前300檔中尋找極弱谷股票
+        scan_limit = 300
+        stock_ids = get_top_stocks(limit=scan_limit)
         alerts = []
         
-        for stock_id in stock_ids:
+        for stock_id in stock_ids[:scan_limit]:
             try:
                 ticker = yf.Ticker(f"{stock_id}.TW")
                 history = ticker.history(period="60d")
@@ -349,6 +378,10 @@ class StockRecommender:
                         'current_price': current_price,
                         'alert_reason': "、".join(reason)
                     })
+                    
+                    # 如果已找到足夠數量的極弱谷股票，則提前結束
+                    if len(alerts) >= count:
+                        break
                 
             except Exception as e:
                 print(f"[stock_recommender] ⚠️ {stock_id} 極弱谷判斷失敗：{e}")
