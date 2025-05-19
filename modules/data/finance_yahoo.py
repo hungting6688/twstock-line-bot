@@ -1,116 +1,376 @@
 """
-處理 Yahoo Finance Rate Limit 問題
+改用 yfinance 獲取 EPS 和股息數據的替代實現
+增強版處理 API 速率限制和連接失敗問題
 """
 
-def get_eps_data_from_yahoo():
+import yfinance as yf
+import concurrent.futures
+from tqdm import tqdm
+import time
+import random
+import pandas as pd
+import numpy as np
+import os
+import json
+from datetime import datetime, timedelta
+
+# 緩存目錄設置
+CACHE_DIR = os.path.join(os.path.dirname(__file__), '../../cache')
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+def get_eps_data_alternative(use_cache=True, cache_expiry_hours=12):
     """
-    使用 Yahoo Finance 獲取 EPS 和股息數據 (備用方案)，增加速率限制處理
+    使用 yfinance 替代方案獲取 EPS 和股息數據，增加緩存和重試機制
+    
+    參數:
+    - use_cache: 是否使用緩存
+    - cache_expiry_hours: 緩存有效時間（小時）
+    
+    返回:
+    - 字典: {stock_id: {"eps": value, "dividend": value}}
     """
-    import yfinance as yf
-    from concurrent.futures import ThreadPoolExecutor
-    from tqdm import tqdm
-    import time
-    import random
+    from modules.data.scraper import get_all_valid_twse_stocks
     
-    print("[scraper] 使用 Yahoo Finance 替代方案獲取財務數據...")
+    # 檢查緩存
+    cache_file = os.path.join(CACHE_DIR, 'eps_data_cache.json')
+    if use_cache and os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+                cache_time = datetime.fromisoformat(cache_data['timestamp'])
+                
+                # 檢查緩存是否過期
+                if datetime.now() - cache_time < timedelta(hours=cache_expiry_hours):
+                    print(f"[finance_yahoo] ✅ 使用緩存的 EPS 數據 (更新於 {cache_time.strftime('%Y-%m-%d %H:%M')})")
+                    return cache_data['data']
+        except Exception as e:
+            print(f"[finance_yahoo] ⚠️ 讀取緩存失敗: {e}")
     
-    # 獲取股票列表
-    stock_list = get_all_valid_twse_stocks()
-    # 限制股票數量，避免請求過多
-    max_stocks = 50  # 降低同時請求的數量
-    stock_list = stock_list[:max_stocks]
+    print("[finance_yahoo] 使用 yfinance 替代方案獲取 EPS 和股息數據...")
+    
+    # 獲取所有上市股票列表
+    try:
+        all_stocks = get_all_valid_twse_stocks()
+        print(f"[finance_yahoo] ✅ 成功獲取 {len(all_stocks)} 檔上市股票列表")
+    except Exception as e:
+        print(f"[finance_yahoo] ⚠️ 無法獲取股票列表: {e}，使用備用清單")
+        all_stocks = get_backup_stock_list()
+    
+    # 限制獲取的股票數量，避免耗時過長
+    max_stocks = 100  # 減少處理的股票數量，避免過多請求
+    stocks_to_process = all_stocks[:max_stocks]
     
     result = {}
     
-    # 使用隨機延遲避免被視為自動請求機器人
-    def fetch_with_retry(stock_id):
-        """帶有重試邏輯的抓取函數"""
-        max_retries = 3
-        for retry in range(max_retries):
-            try:
-                # 加入隨機延遲，避免請求過於頻繁
-                time.sleep(random.uniform(0.5, 2.0))
-                data = fetch_stock_finance(stock_id)
-                return data
-            except Exception as e:
-                if "Too Many Requests" in str(e):
-                    wait_time = (retry + 1) * 5  # 逐漸增加等待時間
-                    print(f"[scraper] ⚠️ Rate limit for {stock_id}, waiting {wait_time}s...")
-                    time.sleep(wait_time)
-                else:
-                    print(f"[scraper] ⚠️ 處理 {stock_id} 時出錯: {str(e)[:100]}")
-                    if retry == max_retries - 1:  # 最後一次重試
-                        return None
-    
-    # 分批處理以避免同時發送過多請求
+    # 分批處理股票，避免同時發送過多請求
     batch_size = 10
-    for i in range(0, len(stock_list), batch_size):
-        batch = stock_list[i:i+batch_size]
+    for i in range(0, len(stocks_to_process), batch_size):
+        batch = stocks_to_process[i:i+batch_size]
+        print(f"[finance_yahoo] 處理批次 {i//batch_size + 1}/{(len(stocks_to_process)-1)//batch_size + 1} ({len(batch)} 檔股票)")
         
-        with ThreadPoolExecutor(max_workers=5) as executor:  # 減少同時執行的線程數
-            futures = {}
-            for stock in batch:
-                stock_id = stock["stock_id"]
-                futures[executor.submit(fetch_with_retry, stock_id)] = stock_id
+        # 使用多線程但限制並發數量
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            # 提交所有任務
+            future_to_stock = {
+                executor.submit(fetch_single_stock_data_with_retry, stock): stock 
+                for stock in batch
+            }
             
-            for future in futures:
-                stock_id = futures[future]
+            # 處理結果
+            for future in concurrent.futures.as_completed(future_to_stock):
+                stock = future_to_stock[future]
                 try:
                     data = future.result()
                     if data:
-                        result[stock_id] = data
+                        result[stock['stock_id']] = data
                 except Exception as e:
-                    print(f"[scraper] ⚠️ 處理 {stock_id} 時出錯: {str(e)[:100]}")
+                    print(f"[finance_yahoo] ⚠️ 處理 {stock['stock_id']} 時出錯: {e}")
         
-        # 每個批次間暫停一下
-        time.sleep(2)
+        # 批次間添加延遲
+        if i + batch_size < len(stocks_to_process):
+            delay = random.uniform(1.5, 3.0)
+            print(f"[finance_yahoo] 等待 {delay:.1f} 秒後處理下一批...")
+            time.sleep(delay)
     
-    print(f"[scraper] ✅ 成功獲取 {len(result)} 檔股票的財務數據 (Yahoo Finance)")
+    print(f"[finance_yahoo] ✅ 成功獲取 {len(result)} 檔股票的財務數據")
+    
+    # 儲存結果到緩存
+    if use_cache and result:
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                cache_data = {
+                    'timestamp': datetime.now().isoformat(),
+                    'data': result
+                }
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+            print(f"[finance_yahoo] ✅ 已更新 EPS 數據緩存")
+        except Exception as e:
+            print(f"[finance_yahoo] ⚠️ 寫入緩存失敗: {e}")
+    
     return result
 
-
-def fetch_stock_finance(stock_id):
+def fetch_single_stock_data_with_retry(stock, max_retries=3):
     """
-    從 Yahoo Finance 獲取單一股票的財務數據，增加錯誤處理
+    使用重試機制獲取單一股票的財務數據
+    
+    參數:
+    - stock: 股票資訊字典
+    - max_retries: 最大重試次數
+    
+    返回:
+    - 財務數據字典
+    """
+    stock_id = stock['stock_id']
+    
+    for retry in range(max_retries):
+        try:
+            # 添加隨機延遲，避免過於頻繁的請求
+            delay = random.uniform(0.5, 1.5) * (retry + 1)
+            time.sleep(delay)
+            
+            return fetch_single_stock_data(stock)
+            
+        except Exception as e:
+            if "Too Many Requests" in str(e) and retry < max_retries - 1:
+                wait_time = 5 * (2 ** retry)  # 指數退避策略：5, 10, 20...秒
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求速率受限，等待 {wait_time} 秒後重試 ({retry+1}/{max_retries})...")
+                time.sleep(wait_time)
+            elif retry < max_retries - 1:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}，重試 ({retry+1}/{max_retries})...")
+                time.sleep(delay)
+            else:
+                print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗: {e}")
+                return None
+    
+    return None
+
+def fetch_single_stock_data(stock):
+    """
+    獲取單一股票的財務數據
+    
+    參數:
+    - stock: 股票資訊字典
+    
+    返回:
+    - 財務數據字典
     """
     try:
-        import yfinance as yf
-        
+        stock_id = stock['stock_id']
+        # 使用 yfinance 獲取股票數據
         ticker = yf.Ticker(f"{stock_id}.TW")
         info = ticker.info
         
-        # 獲取財務數據
-        eps = info.get('trailingEPS')
-        dividend_yield = info.get('dividendYield', 0)
-        
-        # 增加檢查，確保獲取到有效數據
-        if eps is None or eps == 'N/A':
-            eps = None
-        else:
-            try:
-                eps = float(eps)
-                eps = round(eps, 2)
-            except:
+        # 安全地獲取 EPS
+        eps = None
+        try:
+            eps = info.get('trailingEPS')
+            if eps is not None and not pd.isna(eps) and not np.isnan(eps):
+                eps = round(float(eps), 2)
+            else:
                 eps = None
+        except (ValueError, TypeError):
+            eps = None
         
-        # 轉換股息率為百分比
-        if dividend_yield is None or dividend_yield == 'N/A':
-            dividend_yield = None
-        else:
-            try:
-                dividend_yield = float(dividend_yield)
-                if dividend_yield > 0:
-                    dividend_yield = round(dividend_yield * 100, 2)
-                else:
+        # 安全地獲取股息率
+        dividend_yield = None
+        try:
+            dividend_yield = info.get('dividendYield')
+            if dividend_yield is not None and not pd.isna(dividend_yield) and not np.isnan(dividend_yield):
+                dividend_yield = round(float(dividend_yield) * 100, 2)
+                if dividend_yield <= 0:
                     dividend_yield = None
-            except:
+            else:
                 dividend_yield = None
+        except (ValueError, TypeError):
+            dividend_yield = None
         
+        # 返回數據
         return {
             "eps": eps,
             "dividend": dividend_yield
         }
     except Exception as e:
+        # 如果是速率限制錯誤，向上拋出以觸發重試
         if "Too Many Requests" in str(e):
-            raise e  # 讓呼叫者知道是 rate limit 問題
+            raise
+        
+        print(f"[finance_yahoo] ⚠️ {stock['stock_id']} 處理失敗: {e}")
         return None
+
+def get_dividend_data_alternative(use_cache=True, cache_expiry_hours=12):
+    """
+    獲取股息數據的替代實現
+    
+    參數:
+    - use_cache: 是否使用緩存
+    - cache_expiry_hours: 緩存有效時間（小時）
+    
+    返回:
+    - 字典: {stock_id: dividend_value}
+    """
+    # 檢查緩存
+    cache_file = os.path.join(CACHE_DIR, 'dividend_data_cache.json')
+    if use_cache and os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+                cache_time = datetime.fromisoformat(cache_data['timestamp'])
+                
+                # 檢查緩存是否過期
+                if datetime.now() - cache_time < timedelta(hours=cache_expiry_hours):
+                    print(f"[finance_yahoo] ✅ 使用緩存的股息數據 (更新於 {cache_time.strftime('%Y-%m-%d %H:%M')})")
+                    return cache_data['data']
+        except Exception as e:
+            print(f"[finance_yahoo] ⚠️ 讀取股息緩存失敗: {e}")
+    
+    # 獲取完整數據
+    eps_data = get_eps_data_alternative(use_cache, cache_expiry_hours)
+    
+    # 提取股息數據
+    dividend_data = {sid: val["dividend"] for sid, val in eps_data.items() if val["dividend"] is not None}
+    
+    # 儲存結果到緩存
+    if use_cache and dividend_data:
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                cache_data = {
+                    'timestamp': datetime.now().isoformat(),
+                    'data': dividend_data
+                }
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+            print(f"[finance_yahoo] ✅ 已更新股息數據緩存")
+        except Exception as e:
+            print(f"[finance_yahoo] ⚠️ 寫入股息緩存失敗: {e}")
+    
+    return dividend_data
+
+def get_backup_stock_list():
+    """提供備用的上市股票列表"""
+    backup_stocks = [
+        {"stock_id": "2330", "stock_name": "台積電", "market_type": "上市", "industry": "半導體業"},
+        {"stock_id": "2317", "stock_name": "鴻海", "market_type": "上市", "industry": "電子零組件業"},
+        {"stock_id": "2303", "stock_name": "聯電", "market_type": "上市", "industry": "半導體業"},
+        {"stock_id": "2308", "stock_name": "台達電", "market_type": "上市", "industry": "電子零組件業"},
+        {"stock_id": "2454", "stock_name": "聯發科", "market_type": "上市", "industry": "半導體業"},
+        {"stock_id": "2412", "stock_name": "中華電", "market_type": "上市", "industry": "電信業"},
+        {"stock_id": "2882", "stock_name": "國泰金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "1301", "stock_name": "台塑", "market_type": "上市", "industry": "塑膠工業"},
+        {"stock_id": "1303", "stock_name": "南亞", "market_type": "上市", "industry": "塑膠工業"},
+        {"stock_id": "2881", "stock_name": "富邦金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "1216", "stock_name": "統一", "market_type": "上市", "industry": "食品工業"},
+        {"stock_id": "2002", "stock_name": "中鋼", "market_type": "上市", "industry": "鋼鐵工業"},
+        {"stock_id": "2886", "stock_name": "兆豐金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "1101", "stock_name": "台泥", "market_type": "上市", "industry": "水泥工業"},
+        {"stock_id": "2891", "stock_name": "中信金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "3711", "stock_name": "日月光投控", "market_type": "上市", "industry": "半導體業"},
+        {"stock_id": "2327", "stock_name": "國巨", "market_type": "上市", "industry": "電子零組件業"},
+        {"stock_id": "2912", "stock_name": "統一超", "market_type": "上市", "industry": "貿易百貨"},
+        {"stock_id": "2207", "stock_name": "和泰車", "market_type": "上市", "industry": "汽車工業"},
+        {"stock_id": "2884", "stock_name": "玉山金", "market_type": "上市", "industry": "金融業"}
+    ]
+    return backup_stocks
+
+def get_stock_info(stock_id, retry_on_rate_limit=True):
+    """
+    獲取單一股票的詳細資訊，帶重試機制
+    
+    參數:
+    - stock_id: 股票代碼
+    - retry_on_rate_limit: 是否在速率限制時重試
+    
+    返回:
+    - 股票資訊字典
+    """
+    max_retries = 3 if retry_on_rate_limit else 1
+    
+    for retry in range(max_retries):
+        try:
+            # 添加隨機延遲，避免過於頻繁的請求
+            if retry > 0:
+                delay = random.uniform(1.0, 3.0) * (retry + 1)
+                time.sleep(delay)
+            
+            ticker = yf.Ticker(f"{stock_id}.TW")
+            info = ticker.info
+            
+            # 檢查是否獲得有效數據
+            if not info or len(info) < 5:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 獲取的信息不完整")
+                if retry < max_retries - 1:
+                    continue
+                return None
+            
+            return info
+            
+        except Exception as e:
+            if "Too Many Requests" in str(e) and retry < max_retries - 1 and retry_on_rate_limit:
+                wait_time = 5 * (2 ** retry)  # 指數退避策略
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求速率受限，等待 {wait_time} 秒後重試...")
+                time.sleep(wait_time)
+            elif retry < max_retries - 1:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}，重試中...")
+            else:
+                print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗: {e}")
+                return None
+    
+    return None
+
+def get_stock_price_history(stock_id, period="60d", retry_on_rate_limit=True):
+    """
+    獲取股票價格歷史數據，帶重試機制
+    
+    參數:
+    - stock_id: 股票代碼
+    - period: 歷史時間長度
+    - retry_on_rate_limit: 是否在速率限制時重試
+    
+    返回:
+    - 價格歷史 DataFrame
+    """
+    max_retries = 3 if retry_on_rate_limit else 1
+    
+    for retry in range(max_retries):
+        try:
+            # 添加隨機延遲，避免過於頻繁的請求
+            if retry > 0:
+                delay = random.uniform(1.0, 3.0) * (retry + 1)
+                time.sleep(delay)
+            
+            ticker = yf.Ticker(f"{stock_id}.TW")
+            history = ticker.history(period=period)
+            
+            # 檢查是否獲得有效數據
+            if history.empty:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 無法獲取歷史數據")
+                if retry < max_retries - 1:
+                    continue
+                return pd.DataFrame()
+            
+            return history
+            
+        except Exception as e:
+            if "Too Many Requests" in str(e) and retry < max_retries - 1 and retry_on_rate_limit:
+                wait_time = 5 * (2 ** retry)  # 指數退避策略
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求速率受限，等待 {wait_time} 秒後重試...")
+                time.sleep(wait_time)
+            elif retry < max_retries - 1:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}，重試中...")
+            else:
+                print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗: {e}")
+                return pd.DataFrame()
+    
+    return pd.DataFrame()
+
+# 當模組被直接執行時運行的代碼
+if __name__ == "__main__":
+    print("測試 Yahoo Finance 替代方案...")
+    result = get_eps_data_alternative(use_cache=False)
+    print(f"獲取到 {len(result)} 檔股票的 EPS 和股息數據")
+    
+    # 顯示前 5 筆數據
+    count = 0
+    for stock_id, data in result.items():
+        print(f"{stock_id}: EPS={data.get('eps')}, 股息={data.get('dividend')}%")
+        count += 1
+        if count >= 5:
+            break
