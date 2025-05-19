@@ -1,5 +1,5 @@
 """
-LINE 推播模組 - 整合 line_bot.py
+修復版 LINE Bot 模組 - 不考慮額度限制版本
 """
 print("[line_bot] ✅ 已載入最新版")
 
@@ -38,7 +38,7 @@ def send_line_bot_message(message: str):
     }
 
     try:
-        response = requests.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload)
+        response = requests.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload, timeout=30)
         if response.status_code != 200:
             print(f"[line_bot] ❌ 推播失敗：{response.status_code} - {response.text}")
         else:
