@@ -1,26 +1,36 @@
 """
-修復版 LINE Bot 模組 - 不考慮額度限制版本
+修復版 LINE Bot 模組 - 增強錯誤處理和重試機制
 """
 print("[line_bot] ✅ 已載入最新版")
 
 import requests
 import os
+import time
+import random
 
 # 從環境變數獲取 LINE Bot 設定
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_USER_ID = os.getenv("LINE_USER_ID")
 
 
-def send_line_bot_message(message: str):
+def send_line_bot_message(message: str, max_retries=2):
     """
-    發送 LINE 訊息
+    發送 LINE 訊息，增強錯誤處理和重試機制
     
     參數:
     - message: 要發送的訊息內容
+    - max_retries: 最大重試次數
+    
+    返回:
+    - bool: 是否成功發送
+    
+    拋出:
+    - Exception: 發送失敗時拋出例外，包含詳細錯誤訊息
     """
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_USER_ID:
-        print("[line_bot] ❌ 缺少 LINE Token 或 User ID，無法推播")
-        return
+        error_msg = "[line_bot] ❌ 缺少 LINE Token 或 User ID，無法推播"
+        print(error_msg)
+        raise Exception(error_msg)
 
     headers = {
         "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
@@ -37,14 +47,62 @@ def send_line_bot_message(message: str):
         ]
     }
 
-    try:
-        response = requests.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload, timeout=30)
-        if response.status_code != 200:
-            print(f"[line_bot] ❌ 推播失敗：{response.status_code} - {response.text}")
-        else:
-            print("[line_bot] ✅ LINE 訊息推播成功")
-    except Exception as e:
-        print(f"[line_bot] ❌ 推播過程發生錯誤：{e}")
+    # 重試機制
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.post(
+                "https://api.line.me/v2/bot/message/push", 
+                headers=headers, 
+                json=payload, 
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                print("[line_bot] ✅ LINE 訊息推播成功")
+                return True
+            
+            # 處理特定錯誤碼
+            if response.status_code == 429:  # Too Many Requests 錯誤
+                error_msg = f"[line_bot] ❌ 推播失敗：429 - 達到速率限制或月度配額"
+                print(error_msg)
+                # 如果已達到最大重試次數，則拋出異常
+                if attempt >= max_retries:
+                    raise Exception(error_msg + f" - 內容: {response.text}")
+                # 等待較長時間後重試
+                wait_time = 5 * (attempt + 1)
+                print(f"[line_bot] ⏳ 等待 {wait_time} 秒後重試 ({attempt+1}/{max_retries})...")
+                time.sleep(wait_time)
+                continue
+            
+            # 其他錯誤
+            error_msg = f"[line_bot] ❌ 推播失敗：{response.status_code} - {response.text}"
+            print(error_msg)
+            
+            # 如果已達到最大重試次數，則拋出異常
+            if attempt >= max_retries:
+                raise Exception(error_msg)
+            
+            # 等待一段時間後重試
+            wait_time = 2 * (attempt + 1) + random.uniform(0, 1)
+            print(f"[line_bot] ⏳ 等待 {wait_time:.1f} 秒後重試 ({attempt+1}/{max_retries})...")
+            time.sleep(wait_time)
+            
+        except requests.exceptions.RequestException as e:
+            # 網絡錯誤處理
+            error_msg = f"[line_bot] ❌ 推播過程發生網絡錯誤：{e}"
+            print(error_msg)
+            
+            # 如果已達到最大重試次數，則拋出異常
+            if attempt >= max_retries:
+                raise Exception(error_msg)
+            
+            # 等待一段時間後重試
+            wait_time = 2 * (attempt + 1) + random.uniform(0, 1)
+            print(f"[line_bot] ⏳ 等待 {wait_time:.1f} 秒後重試 ({attempt+1}/{max_retries})...")
+            time.sleep(wait_time)
+    
+    # 如果所有重試都失敗
+    raise Exception("[line_bot] ❌ 所有重試嘗試均失敗")
 
 
 def send_stock_recommendation(user_id, stocks, time_slot):
@@ -122,4 +180,38 @@ def send_opening_report(recommended_stocks, watchlist_stocks, weak_stocks):
         for stock in weak_stocks:
             message += f"❗ {stock['stock_id']} {stock['name']}｜走弱原因：{stock['reason']}\n"
 
-    send_line_bot_message(message.strip())
+    # 檢查訊息長度，LINE 單則訊息有5000字元的限制
+    if len(message) > 4500:
+        # 分割訊息
+        parts = []
+        current_part = message[:4500]
+        parts.append(current_part)
+        
+        if recommended_stocks and watchlist_stocks:
+            part2 = f"📈 {now} 開盤推薦分析結果 (續)\n\n"
+            if weak_stocks:
+                part2 += "\n⚠️ 走弱警示股：\n"
+                for stock in weak_stocks:
+                    part2 += f"❗ {stock['stock_id']} {stock['name']}｜走弱原因：{stock['reason']}\n"
+            parts.append(part2)
+        
+        # 分別發送每一部分
+        for i, part in enumerate(parts):
+            try:
+                send_line_bot_message(part)
+                # 避免訊息被視為洪水攻擊
+                if i < len(parts) - 1:
+                    time.sleep(1)
+            except Exception as e:
+                print(f"[line_bot] ❌ 發送訊息第 {i+1} 部分失敗: {e}")
+    else:
+        send_line_bot_message(message.strip())
+
+# 測試函數
+if __name__ == "__main__":
+    test_message = "這是一條測試訊息，用於確認 LINE Bot 推播功能是否正常。"
+    try:
+        send_line_bot_message(test_message)
+        print("LINE 測試訊息發送成功！")
+    except Exception as e:
+        print(f"LINE 測試訊息發送失敗: {e}")
