@@ -1,10 +1,11 @@
 """
 市場情緒分析模組 - 整合 market_sentiment.py
+修正版本 - 新增 pandas 導入並修復 FutureWarning
 """
 print("[sentiment] ✅ 已載入最新版")
 
 import yfinance as yf
-import pandas as pd  # 添加缺失的 pandas 導入
+import pandas as pd  # 修正：添加 pandas 導入
 import numpy as np
 from datetime import datetime, timedelta
 
@@ -47,7 +48,7 @@ def get_market_sentiment_score():
                 print(f"[sentiment] ⚠️ {symbol} 收盤價資料不足")
                 continue
                 
-            # 修正 FutureWarning
+            # 修正：安全處理 pandas Series
             last_close = float(closes.iloc[-1]) if isinstance(closes.iloc[-1], pd.Series) else closes.iloc[-1]
             prev_close = float(closes.iloc[-2]) if isinstance(closes.iloc[-2], pd.Series) else closes.iloc[-2]
             
@@ -149,7 +150,7 @@ def analyze_relative_strength(stock_code):
         if twii_history.empty or len(twii_history) < 20:
             return 0, "無法取得台股加權指數數據"
             
-        # 取得收盤價，並修正可能的 Series 類型錯誤
+        # 修正：安全處理 pandas Series
         stock_close_20 = float(history['Close'].iloc[-20]) if isinstance(history['Close'].iloc[-20], pd.Series) else history['Close'].iloc[-20]
         stock_close_now = float(history['Close'].iloc[-1]) if isinstance(history['Close'].iloc[-1], pd.Series) else history['Close'].iloc[-1]
         
@@ -234,3 +235,18 @@ def analyze_fund_flow(stock_code, days=5):
     except Exception as e:
         print(f"[sentiment] ⚠️ {stock_code} 資金流向分析失敗：{e}")
         return 0, "無法分析資金流向"
+
+# 測試函數
+if __name__ == "__main__":
+    print("測試市場情緒模組")
+    score = get_market_sentiment_score()
+    print(f"市場情緒評分：{score}/10")
+    
+    # 測試相對強度分析
+    stock_code = "2330"  # 台積電
+    rel_strength, desc = analyze_relative_strength(stock_code)
+    print(f"{stock_code} 相對強度：{rel_strength:.2f}% ({desc})")
+    
+    # 測試資金流向分析
+    flow_strength, flow_desc = analyze_fund_flow(stock_code)
+    print(f"{stock_code} 資金流向：{flow_desc}")
