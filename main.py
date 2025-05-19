@@ -173,7 +173,17 @@ def check_system_environment():
 def is_trading_day():
     """檢查今天是否為交易日 (排除假日和週末)"""
     today = datetime.now()
-    weekday = today.weekday()
+    
+    # 顯示當前時間，幫助診斷
+    print(f"[main] 系統時間：{today}，星期：{today.weekday()}")
+    
+    # 設定台灣時區 (UTC+8)
+    taiwan_tz_offset = timedelta(hours=8)
+    taiwan_today = today + taiwan_tz_offset
+    
+    # 使用台灣時間判斷週末
+    weekday = taiwan_today.weekday()
+    print(f"[main] 台灣時間：{taiwan_today}，星期：{weekday}")
     
     # 週末不是交易日
     if weekday >= 5:  # 5=週六, 6=週日
@@ -183,8 +193,8 @@ def is_trading_day():
     # 這裡可以添加台灣股市假日檢查邏輯
     # 可以使用一個假日列表或API來檢查
     holidays = get_taiwan_stock_holidays()
-    if today.strftime('%Y-%m-%d') in holidays:
-        print(f"[main] 今天是股市假日 {today.strftime('%Y-%m-%d')}，不執行推播")
+    if taiwan_today.strftime('%Y-%m-%d') in holidays:
+        print(f"[main] 今天是股市假日 {taiwan_today.strftime('%Y-%m-%d')}，不執行推播")
         return False
     
     return True
