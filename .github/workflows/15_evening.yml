@@ -8,6 +8,7 @@ on:
 jobs:
   run-evening:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # 增加執行超時設定
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -16,10 +17,21 @@ jobs:
           python-version: '3.10'
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Test network connection
+        run: |
+          echo "測試網絡連接..."
+          ping -c 4 finance.yahoo.com || echo "ping 失敗但繼續執行"
+          curl -I https://finance.yahoo.com || echo "curl 失敗但繼續執行"
       - name: Run Evening Recommendations
         env:
           GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+          YAHOO_FINANCE_RETRY_ATTEMPTS: "5"
+          YAHOO_FINANCE_BATCH_DELAY: "5"
+          TZ: "Asia/Taipei"
         run: python main.py --mode=evening
