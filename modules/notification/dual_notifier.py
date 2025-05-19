@@ -6,10 +6,12 @@ print("[dual_notifier] ✅ 已載入雙重通知模組")
 # 導入 LINE 和電子郵件通知模組
 from modules.notification.line_bot import send_line_bot_message
 from modules.notification.email_notifier import send_email
+from email.utils import formatdate
+from datetime import datetime
 
 def send_notification(message, subject=None, html_body=None):
     """
-    同時發送 LINE 和電子郵件通知
+    同時發送 LINE 和電子郵件通知，無論 LINE 是否成功
     
     參數:
     - message: 通知內容
@@ -20,15 +22,30 @@ def send_notification(message, subject=None, html_body=None):
     - dict: 各通知渠道的發送結果
     """
     results = {"line": False, "email": False}
+    line_error = None
     
     # 嘗試發送 LINE 通知
     try:
         send_line_bot_message(message)
         results["line"] = True
+        print("[dual_notifier] ✅ LINE 訊息推播成功")
     except Exception as e:
-        print(f"[dual_notifier] ⚠️ LINE 通知發送失敗: {e}")
+        line_error = str(e)
+        # 檢查是否為月度限額錯誤
+        if "429" in line_error or "monthly limit" in line_error.lower() or "reached your monthly limit" in line_error.lower():
+            print(f"[dual_notifier] ⚠️ LINE Bot 已達到月度推送限額")
+            
+            # 將限額信息添加到電子郵件中
+            if html_body:
+                html_body += """
+                <div style="margin-top: 20px; padding: 10px; background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; border-radius: 5px;">
+                    <strong>注意：</strong> LINE Bot 已達到本月推送限額，通知暫時只能通過電子郵件發送。
+                </div>
+                """
+        else:
+            print(f"[dual_notifier] ⚠️ LINE 通知發送失敗: {e}")
     
-    # 嘗試發送電子郵件通知
+    # 無論 LINE 是否成功，都發送電子郵件通知 (雙重通知)
     try:
         # 如果未指定主題，使用消息內容的前20個字符
         if not subject:
@@ -39,6 +56,7 @@ def send_notification(message, subject=None, html_body=None):
         
         send_email(subject, message, html_body)
         results["email"] = True
+        print("[dual_notifier] ✅ 電子郵件通知發送成功")
     except Exception as e:
         print(f"[dual_notifier] ⚠️ 電子郵件通知發送失敗: {e}")
     
@@ -48,6 +66,8 @@ def send_notification(message, subject=None, html_body=None):
         print(f"[dual_notifier] ✅ 通知已成功發送至: {', '.join(success_channels)}")
     else:
         print(f"[dual_notifier] ❌ 所有通知渠道均發送失敗")
+        if line_error:
+            print(f"[dual_notifier] LINE 錯誤詳情: {line_error}")
     
     return results
 
@@ -59,7 +79,6 @@ def send_stock_recommendations(stocks, time_slot):
     - stocks: 推薦股票列表
     - time_slot: 時段名稱
     """
-    from datetime import datetime
     
     if not stocks:
         message = f"【{time_slot}推薦股票】\n\n沒有符合條件的推薦股票"
@@ -122,7 +141,6 @@ def send_weak_valley_alerts(weak_valleys):
     參數:
     - weak_valleys: 極弱谷股票列表
     """
-    from datetime import datetime
     
     if not weak_valleys:
         return
@@ -182,7 +200,6 @@ def send_market_summary(market_score, top_performers, weak_performers):
     - top_performers: 表現最佳的股票列表
     - weak_performers: 表現最差的股票列表
     """
-    from datetime import datetime
     
     # 生成市場評估文字
     if market_score >= 8:
@@ -286,10 +303,4 @@ def send_market_summary(market_score, top_performers, weak_performers):
     subject = f"【每日市場總結】- {datetime.now().strftime('%Y/%m/%d')} - 情緒指數 {market_score}/10"
     send_notification(message, subject, html_body)
 
-# 測試雙重通知功能
-if __name__ == "__main__":
-    print("測試雙重通知功能")
-    test_message = "這是一條測試通知，同時通過 LINE 和電子郵件發送。"
-    test_subject = "雙重通知測試"
-    test_html = "<h1>測試 HTML 郵件</h1><p>這是一條測試通知，通過 HTML 格式的電子郵件發送。</p>"
-    send_notification(test_message, test_subject, test_html)
+# 測試雙重通知
