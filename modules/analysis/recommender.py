@@ -1,78 +1,320 @@
 """
-股票推薦分析模組 - 改進版，增強超時處理和部分結果處理能力
-
-此模組提供多策略的股票推薦與風險分析功能，包括：
-1. 不同時段的股票推薦策略
-2. 弱勢股票預警
-3. 多維度股票評估
+股票推薦生成模組 - 支持多種策略選股
 """
-
-import numpy as np
-import twstock
-import pandas as pd
-from datetime import datetime
-import yfinance as yf
-import threading
-import time
 import os
 import json
 import traceback
+import yfinance as yf
+from datetime import datetime, timedelta
 
-from modules.multi_analysis import analyze_stock_value
+# 假設這些函數已在其他模組中定義
+from modules.data.stock_data import get_top_stocks, get_eps_data
 from modules.analysis.technical import analyze_technical_indicators
-from modules.data.fetcher import get_top_stocks
-from modules.data.scraper import get_all_valid_twse_stocks, get_eps_data, get_dividend_data
-from modules.notification.line_bot import send_line_bot_message
-
-# 緩存目錄設置
-CACHE_DIR = os.path.join(os.path.dirname(__file__), '../../cache')
-os.makedirs(CACHE_DIR, exist_ok=True)
-
-# 重要股票清單 - 優先處理這些股票
-PRIORITY_STOCKS = [
-    "2330", "2317", "2454", "2412", "2303", "2308", "2882", "2881", 
-    "1301", "1303", "2002", "2886", "1216", "2891", "3711", "2327"
-]
+from modules.config import CACHE_DIR
 
 class StockRecommender:
+    """
+    股票推薦系統，提供多種選股策略
+    """
+    
     @staticmethod
-    def get_stock_recommendations(time_slot, count=None):
+    def _morning_strategy(count=5):
         """
-        根據時段獲取推薦股票
+        早盤前策略: 關注前一天收漲且技術指標偏多的股票
+        """
+        # 掃描限制
+        scan_limit = 40
+        
+        # 獲取熱門股票
+        stock_ids = get_top_stocks(limit=scan_limit)
+        
+        # 分析技術指標
+        tech_results = analyze_technical_indicators(stock_ids)
+        
+        # 篩選符合條件的股票
+        candidates = []
+        for sid, data in tech_results.items():
+            # 早盤策略: KD曲線向上，RSI > 50，MACD > 0
+            if data.get('RSI', 0) > 50 and data.get('score', 0) >= 3:
+                try:
+                    ticker = yf.Ticker(f"{sid}.TW")
+                    info = ticker.info
+                    history = ticker.history(period="1mo")
+                    
+                    if history.empty:
+                        continue
+                        
+                    name = info.get('shortName', sid)
+                    current_price = history['Close'].iloc[-1]
+                    
+                    # 計算目標價和止損價
+                    target_price = round(current_price * 1.05, 2)  # 上漲5%
+                    stop_loss = round(current_price * 0.97, 2)     # 下跌3%
+                    
+                    candidates.append({
+                        'code': sid,
+                        'name': name,
+                        'reason': data.get('desc', '技術指標強勢'),
+                        'target_price': target_price,
+                        'stop_loss': stop_loss,
+                        'current_price': current_price
+                    })
+                except Exception as e:
+                    print(f"[stock_recommender] ⚠️ {sid} 分析失敗：{e}")
+        
+        # 排序並限制數量
+        candidates.sort(key=lambda x: x.get('current_price', 0) / x.get('stop_loss', 1), reverse=True)  # 風險報酬比排序
+        
+        return candidates[:count]
+    
+    @staticmethod
+    def _noon_strategy(count=3):
+        """
+        午盤策略: 關注上午交易量增加且呈現多頭排列的股票
+        """
+        # 掃描限制
+        scan_limit = 30
+        
+        # 獲取熱門股票
+        stock_ids = get_top_stocks(limit=scan_limit)
+        
+        # 分析技術指標
+        tech_results = analyze_technical_indicators(stock_ids)
+        
+        # 篩選符合條件的股票
+        candidates = []
+        for sid, data in tech_results.items():
+            # 技術指標得分高且符合午盤策略的股票
+            if '均線多頭排列' in data.get('desc', '') and data.get('score', 0) >= 3:
+                try:
+                    ticker = yf.Ticker(f"{sid}.TW")
+                    info = ticker.info
+                    history = ticker.history(period="1mo")
+                    
+                    if history.empty:
+                        continue
+                        
+                    name = info.get('shortName', sid)
+                    current_price = history['Close'].iloc[-1]
+                    
+                    # 計算目標價和止損價
+                    target_price = round(current_price * 1.05, 2)  # 上漲5%
+                    stop_loss = round(current_price * 0.97, 2)     # 下跌3%
+                    
+                    candidates.append({
+                        'code': sid,
+                        'name': name,
+                        'reason': data.get('desc', '技術指標強勢'),
+                        'target_price': target_price,
+                        'stop_loss': stop_loss,
+                        'current_price': current_price
+                    })
+                except Exception as e:
+                    print(f"[stock_recommender] ⚠️ {sid} 分析失敗：{e}")
+        
+        # 排序並限制數量
+        candidates.sort(key=lambda x: x.get('current_price', 0) / x.get('stop_loss', 1), reverse=True)  # 風險報酬比排序
+        
+        return candidates[:count]
+    
+    @staticmethod
+    def _afternoon_strategy(count=3):
+        """
+        下午策略: 關注突破盤整且交易量放大的股票
+        """
+        # 掃描限制
+        scan_limit = 30
+        
+        # 獲取熱門股票
+        stock_ids = get_top_stocks(limit=scan_limit)
+        
+        # 分析技術指標
+        tech_results = analyze_technical_indicators(stock_ids)
+        
+        # 篩選符合條件的股票
+        candidates = []
+        for sid, data in tech_results.items():
+            # 下午策略: 突破盤整，交易量放大
+            if '突破盤整' in data.get('desc', '') and data.get('score', 0) >= 3:
+                try:
+                    ticker = yf.Ticker(f"{sid}.TW")
+                    info = ticker.info
+                    history = ticker.history(period="1mo")
+                    
+                    if history.empty:
+                        continue
+                        
+                    name = info.get('shortName', sid)
+                    current_price = history['Close'].iloc[-1]
+                    
+                    # 計算目標價和止損價
+                    target_price = round(current_price * 1.04, 2)  # 上漲4%
+                    stop_loss = round(current_price * 0.97, 2)     # 下跌3%
+                    
+                    candidates.append({
+                        'code': sid,
+                        'name': name,
+                        'reason': data.get('desc', '突破盤整'),
+                        'target_price': target_price,
+                        'stop_loss': stop_loss,
+                        'current_price': current_price
+                    })
+                except Exception as e:
+                    print(f"[stock_recommender] ⚠️ {sid} 分析失敗：{e}")
+        
+        # 排序並限制數量
+        candidates.sort(key=lambda x: x.get('current_price', 0) / x.get('stop_loss', 1), reverse=True)  # 風險報酬比排序
+        
+        return candidates[:count]
+    
+    @staticmethod
+    def _evening_strategy(count=5):
+        """
+        盤後策略: 關注當日表現良好，技術指標多頭的股票
+        """
+        # 掃描限制
+        scan_limit = 50
+        
+        # 獲取熱門股票
+        stock_ids = get_top_stocks(limit=scan_limit)
+        
+        # 分析技術指標
+        tech_results = analyze_technical_indicators(stock_ids)
+        
+        # 篩選符合條件的股票
+        candidates = []
+        for sid, data in tech_results.items():
+            # 盤後策略: 技術指標良好，當日表現不錯
+            if data.get('score', 0) >= 4:
+                try:
+                    ticker = yf.Ticker(f"{sid}.TW")
+                    info = ticker.info
+                    history = ticker.history(period="1mo")
+                    
+                    if history.empty:
+                        continue
+                        
+                    name = info.get('shortName', sid)
+                    current_price = history['Close'].iloc[-1]
+                    
+                    # 計算目標價和止損價
+                    target_price = round(current_price * 1.07, 2)  # 上漲7%
+                    stop_loss = round(current_price * 0.95, 2)     # 下跌5%
+                    
+                    candidates.append({
+                        'code': sid,
+                        'name': name,
+                        'reason': data.get('desc', '技術指標強勢'),
+                        'target_price': target_price,
+                        'stop_loss': stop_loss,
+                        'current_price': current_price
+                    })
+                except Exception as e:
+                    print(f"[stock_recommender] ⚠️ {sid} 分析失敗：{e}")
+        
+        # 排序並限制數量
+        candidates.sort(key=lambda x: x.get('current_price', 0) / x.get('stop_loss', 1), reverse=True)  # 風險報酬比排序
+        
+        return candidates[:count]
+    
+    @staticmethod
+    def get_weak_valley_alerts(count=2):
+        """
+        獲取技術極弱股警示
+        """
+        # 掃描限制
+        scan_limit = 50
+        
+        # 獲取熱門股票
+        stock_ids = get_top_stocks(limit=scan_limit)
+        
+        # 分析技術指標
+        tech_results = analyze_technical_indicators(stock_ids)
+        
+        # 篩選符合條件的股票
+        candidates = []
+        for sid, data in tech_results.items():
+            # 極弱股條件：RSI < 30, 技術指標得分低，跌破支撐
+            if data.get('RSI', 99) < 30 or data.get('score', 5) <= 1 or '跌破支撐' in data.get('desc', ''):
+                try:
+                    ticker = yf.Ticker(f"{sid}.TW")
+                    info = ticker.info
+                    history = ticker.history(period="1mo")
+                    
+                    if history.empty:
+                        continue
+                        
+                    name = info.get('shortName', sid)
+                    current_price = history['Close'].iloc[-1]
+                    
+                    # 警報原因
+                    alert_reasons = []
+                    if data.get('RSI', 99) < 30:
+                        alert_reasons.append(f"RSI低迷({data.get('RSI', 0):.1f})")
+                    if '跌破支撐' in data.get('desc', ''):
+                        alert_reasons.append('跌破重要支撐')
+                    if data.get('score', 5) <= 1:
+                        alert_reasons.append('技術指標極弱')
+                    
+                    alert_reason = "、".join(alert_reasons)
+                    
+                    candidates.append({
+                        'code': sid,
+                        'name': name,
+                        'alert_reason': alert_reason,
+                        'current_price': current_price
+                    })
+                except Exception as e:
+                    print(f"[stock_recommender] ⚠️ {sid} 弱勢分析失敗：{e}")
+        
+        # 排序並限制數量 (按RSI值升序排序)
+        candidates.sort(key=lambda x: tech_results.get(x['code'], {}).get('RSI', 50))
+        
+        return candidates[:count]
+    
+    @staticmethod
+    def get_multi_strategy_recommendations(time_slot="morning", count=None):
+        """
+        獲取多策略股票推薦 (短線、長線、極弱股)
         
         Args:
             time_slot (str): 時段 ('morning', 'noon', 'afternoon', 'evening')
-            count (int): 推薦股票數量，None 表示使用預設值
+            count (int): 每種策略的推薦股票數量
         
         Returns:
-            list: 推薦股票列表
+            dict: 包含三種策略的推薦股票字典
         """
-        print(f"[stock_recommender] ⏳ 執行{time_slot}推薦分析...")
+        print(f"[stock_recommender] ⏳ 執行{time_slot}多策略分析...")
         
-        # 根據時段設置預設推薦數量
+        # 根據時段設置每類推薦數量
         if count is None:
             if time_slot == 'morning':
-                count = 6  # 早盤前推薦6檔
+                short_term_count = 5  # 早盤前短線推薦5檔
+                long_term_count = 3   # 早盤前長線推薦3檔
+                weak_stock_count = 2  # 早盤前極弱股2檔
             elif time_slot == 'noon':
-                count = 6  # 午盤推薦6檔
+                short_term_count = 4
+                long_term_count = 2
+                weak_stock_count = 1
             elif time_slot == 'afternoon':
-                count = 6  # 上午看盤推薦6檔
+                short_term_count = 4
+                long_term_count = 2
+                weak_stock_count = 1
             elif time_slot == 'evening':
-                count = 10  # 盤後分析推薦10檔
+                short_term_count = 5
+                long_term_count = 5
+                weak_stock_count = 2
             else:
-                count = 6  # 默認值
+                short_term_count = 3
+                long_term_count = 3
+                weak_stock_count = 1
+        else:
+            short_term_count = count
+            long_term_count = count
+            weak_stock_count = min(count, 2)  # 極弱股最多2檔，避免過多負面訊息
         
-        strategies = {
-            'morning': StockRecommender._morning_strategy,
-            'noon': StockRecommender._noon_strategy,
-            'afternoon': StockRecommender._afternoon_strategy,
-            'evening': StockRecommender._evening_strategy
-        }
-        
-        strategy_func = strategies.get(time_slot)
-        
-        # 檢查緩存，避免短時間內重複分析
-        cache_file = os.path.join(CACHE_DIR, f'recommendation_{time_slot}_cache.json')
+        # 檢查緩存
+        cache_file = os.path.join(CACHE_DIR, f'multi_strategy_{time_slot}_cache.json')
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, 'r', encoding='utf-8') as f:
@@ -81,400 +323,80 @@ class StockRecommender:
                     
                     # 如果緩存時間不超過30分鐘，直接使用緩存
                     if (datetime.now() - cache_time).total_seconds() < 1800:  # 30分鐘
-                        print(f"[stock_recommender] ✅ 使用緩存的{time_slot}推薦 (更新於 {cache_time.strftime('%H:%M:%S')})")
+                        print(f"[stock_recommender] ✅ 使用緩存的{time_slot}多策略推薦")
                         return cache_data['recommendations']
             except Exception as e:
-                print(f"[stock_recommender] ⚠️ 讀取推薦緩存失敗: {e}")
+                print(f"[stock_recommender] ⚠️ 讀取多策略推薦緩存失敗: {e}")
         
-        # 執行策略函數，獲取推薦
+        # 獲取各策略推薦
         try:
-            recommendations = strategy_func(count) if strategy_func else []
+            # 1. 獲取短線推薦
+            short_term_stocks = StockRecommender._short_term_strategy(short_term_count, time_slot)
+            
+            # 2. 獲取長線推薦
+            long_term_stocks = StockRecommender._long_term_strategy(long_term_count, time_slot)
+            
+            # 3. 獲取極弱股警示
+            weak_stocks = StockRecommender.get_weak_valley_alerts(weak_stock_count)
+            
+            # 整合結果
+            recommendations = {
+                "short_term": short_term_stocks,
+                "long_term": long_term_stocks,
+                "weak_stocks": weak_stocks
+            }
             
             # 儲存推薦結果到緩存
-            if recommendations:
-                try:
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        cache_data = {
-                            'timestamp': datetime.now().isoformat(),
-                            'recommendations': recommendations
-                        }
-                        json.dump(cache_data, f, ensure_ascii=False, indent=2)
-                    print(f"[stock_recommender] ✅ 已緩存{time_slot}推薦結果")
-                except Exception as e:
-                    print(f"[stock_recommender] ⚠️ 寫入推薦緩存失敗: {e}")
-                    
+            try:
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    cache_data = {
+                        'timestamp': datetime.now().isoformat(),
+                        'recommendations': recommendations
+                    }
+                    json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                print(f"[stock_recommender] ✅ 已緩存{time_slot}多策略推薦結果")
+            except Exception as e:
+                print(f"[stock_recommender] ⚠️ 寫入多策略推薦緩存失敗: {e}")
+            
             return recommendations
         except Exception as e:
-            print(f"[stock_recommender] ❌ {time_slot}策略執行失敗: {e}")
+            print(f"[stock_recommender] ❌ 多策略分析失敗: {e}")
             traceback.print_exc()
-            return []
+            return {"short_term": [], "long_term": [], "weak_stocks": []}
 
     @staticmethod
-    def _morning_strategy(count):
+    def _short_term_strategy(count, time_slot):
         """
-        早盤前推薦策略 - 增強版，支持部分結果處理
-        
-        專注於處理優先股票，然後處理其他股票，即使分析未完全完成也能返回部分結果
+        短線推薦策略 (RSI > 50、KD 金叉、MACD 翻多、布林突破)
+        使用現有的 morning_strategy、noon_strategy 等作為短線策略的基礎
         """
-        # 掃描限制保持100檔
-        scan_limit = 100
+        # 優先使用現有策略函數
+        existing_strategies = {
+            'morning': StockRecommender._morning_strategy,
+            'noon': StockRecommender._noon_strategy,
+            'afternoon': StockRecommender._afternoon_strategy,
+            'evening': StockRecommender._evening_strategy
+        }
         
-        # 獲取活躍股票
-        print(f"[stock_recommender] 獲取前{scan_limit}檔熱門股票...")
-        try:
-            top_stocks = get_top_stocks(limit=scan_limit)
-            
-            # 確保優先股票在前面處理
-            priority_stocks = [s for s in PRIORITY_STOCKS if s in top_stocks]
-            other_stocks = [s for s in top_stocks if s not in PRIORITY_STOCKS]
-            
-            # 重排序股票清單，優先股在前
-            priority_ordered_stocks = priority_stocks + other_stocks
-            
-            # 如果獲取失敗，使用備用清單
-            if not priority_ordered_stocks:
-                raise ValueError("無法獲取股票清單")
-                
-        except Exception as e:
-            print(f"[stock_recommender] ⚠️ 獲取熱門股票失敗: {e}，使用備用清單")
-            # 使用備用清單
-            priority_ordered_stocks = PRIORITY_STOCKS[:20]  # 僅使用前20個優先股
+        strategy_func = existing_strategies.get(time_slot)
+        if strategy_func:
+            return strategy_func(count)
         
-        print(f"[stock_recommender] 分析早盤技術指標與基本面...")
-        
-        # 預先獲取 EPS 數據，避免每支股票都重新獲取
-        eps_data = {}
-        try:
-            print("[stock_recommender] 一次性獲取 EPS 數據...")
-            eps_data = get_eps_data(use_cache=True, cache_expiry_hours=72)  # 增加緩存有效期
-            if eps_data:
-                print(f"[stock_recommender] ✅ 成功獲取 {len(eps_data)} 檔股票的 EPS 數據")
-            else:
-                print("[stock_recommender] ⚠️ 未能獲取 EPS 數據，將使用有限信息進行分析")
-        except Exception as e:
-            print(f"[stock_recommender] ⚠️ 獲取 EPS 數據失敗: {e}")
-        
-        # 分階段處理和返回結果
-        candidates = []
-        processed_count = 0
-        max_processing_time = 150  # 最大處理時間150秒
-        start_time = time.time()
-        
-        # 定義處理單一股票的函數
-        def process_stock(stock_id):
-            nonlocal processed_count
-            nonlocal candidates
-            
-            try:
-                # 檢查是否超時
-                if time.time() - start_time > max_processing_time:
-                    return False  # 超時，停止處理
-                
-                # 添加超時控制
-                result = {"completed": False, "score": 0, "analysis": None}
-                
-                def analyze():
-                    try:
-                        # 使用較短的超時時間獲取數據
-                        ticker = yf.Ticker(f"{stock_id}.TW")
-                        
-                        # 獲取歷史數據
-                        history = ticker.history(period="30d")
-                        if history.empty:
-                            print(f"[stock_recommender] ⚠️ {stock_id} 無歷史數據")
-                            return
-                        
-                        score, analysis = analyze_stock_value(stock_id)
-                        result["score"] = score
-                        result["analysis"] = analysis
-                        result["completed"] = True
-                    except Exception as e:
-                        print(f"[stock_recommender] ⚠️ {stock_id} 分析失敗: {e}")
-                
-                # 創建並啟動線程
-                t = threading.Thread(target=analyze)
-                t.daemon = True
-                t.start()
-                
-                # 等待分析完成或超時 (縮短到3秒)
-                t.join(3)
-                
-                if not result["completed"]:
-                    print(f"[stock_recommender] ⚠️ {stock_id} 分析超時")
-                    processed_count += 1
-                    return True  # 繼續處理下一股
-                
-                score = result["score"]
-                analysis = result["analysis"]
-                
-                # 獲取股票名稱 - 優先使用緩存的資料
-                name = stock_id
-                try:
-                    if eps_data and stock_id in eps_data:
-                        # 如果有資料，嘗試獲取名稱
-                        # 這裡假設沒有名稱資訊，僅作為範例
-                        pass
-                    else:
-                        # 嘗試從 yfinance 獲取名稱
-                        info = ticker.info
-                        if 'shortName' in info:
-                            name = info.get('shortName', stock_id)
-                        else:
-                            # 嘗試直接從URL抓取名字
-                            name = stock_id  # 作為備用
-                except Exception:
-                    name = stock_id  # 如果獲取失敗，使用代號
-                
-                if score > 40:  # 降低分數門檻，確保有足夠的候選股票
-                    current_price = None
-                    try:
-                        if not history.empty and 'Close' in history:
-                            current_price = history['Close'].iloc[-1]
-                    except:
-                        pass
-                        
-                    candidates.append({
-                        'code': stock_id,
-                        'name': name,
-                        'score': score,
-                        'analysis': analysis,
-                        'current_price': current_price
-                    })
-                    
-                    # 當候選股票數達到 count*3 時，可以提前結束
-                    if len(candidates) >= count * 3:
-                        print(f"[stock_recommender] 已獲取足夠候選股票 ({len(candidates)}檔)，可以提前結束")
-                        # 但不立即停止，而是繼續處理一段時間，確保優先股票被處理
-                
-                processed_count += 1
-                return True  # 繼續處理
-                
-            except Exception as e:
-                print(f"[stock_recommender] ⚠️ {stock_id} 處理失敗：{e}")
-                processed_count += 1
-                return True  # 繼續處理下一股
-        
-        # 首先處理優先股票
-        for stock_id in priority_ordered_stocks:
-            if not process_stock(stock_id):
-                break  # 時間到，停止處理
-                
-            # 定期檢查是否已有足夠候選股票
-            if len(candidates) >= count and processed_count >= 20:
-                print(f"[stock_recommender] 已處理 {processed_count} 檔股票，找到 {len(candidates)} 個候選，提前結束分析")
-                break
-        
-        print(f"[stock_recommender] 完成分析, 共處理了 {processed_count} 檔股票，找到 {len(candidates)} 個候選")
-        
-        # 如果沒有足夠的候選股，但已經處理了一些股票，嘗試降低門檻
-        if len(candidates) < count and processed_count > 0:
-            print(f"[stock_recommender] ⚠️ 候選股數量不足 ({len(candidates)}/{count})，使用已處理的結果")
-        
-        # 根據分數排序並選出前N名
-        candidates.sort(key=lambda x: x['score'], reverse=True)
-        top_candidates = candidates[:count]
-        
-        recommendations = []
-        for candidate in top_candidates:
-            try:
-                # 使用已獲取的當前價格計算目標和止損價
-                current_price = candidate.get('current_price')
-                
-                # 如果沒有當前價格，再次嘗試獲取
-                if current_price is None:
-                    try:
-                        ticker = yf.Ticker(f"{candidate['code']}.TW")
-                        history = ticker.history(period="1d")
-                        if not history.empty:
-                            current_price = history['Close'].iloc[-1]
-                    except:
-                        # 如果依然失敗，使用估計值
-                        current_price = 100  # 預設值
-                
-                target_price = round(current_price * 1.05, 2)  # 目標漲幅5%
-                stop_loss = round(current_price * 0.97, 2)    # 止損點3%
-                
-                reason = f"技術面：{candidate['analysis'].get('technical', '無技術分析')}，"
-                reason += f"基本面：{candidate['analysis'].get('fundamental', '無基本面分析')}"
-                
-                recommendations.append({
-                    'code': candidate['code'],
-                    'name': candidate['name'],
-                    'reason': reason,
-                    'target_price': target_price,
-                    'stop_loss': stop_loss,
-                    'current_price': current_price
-                })
-            except Exception as e:
-                print(f"[stock_recommender] ⚠️ {candidate['code']} 處理失敗：{e}")
-        
-        # 如果推薦數量不足，使用優先股填充
-        if len(recommendations) < count:
-            missing_count = count - len(recommendations)
-            print(f"[stock_recommender] ⚠️ 推薦數量不足，缺少 {missing_count} 檔，使用預設股票填充")
-            
-            # 獲取已推薦的股票代碼
-            recommended_codes = [r['code'] for r in recommendations]
-            
-            # 使用優先股填充，優先使用尚未推薦的股票
-            for stock_id in PRIORITY_STOCKS:
-                if stock_id not in recommended_codes and len(recommendations) < count:
-                    try:
-                        ticker = yf.Ticker(f"{stock_id}.TW")
-                        info = ticker.info
-                        history = ticker.history(period="7d")
-                        
-                        name = info.get('shortName', stock_id)
-                        current_price = history['Close'].iloc[-1] if not history.empty else 100
-                        
-                        target_price = round(current_price * 1.05, 2)
-                        stop_loss = round(current_price * 0.97, 2)
-                        
-                        recommendations.append({
-                            'code': stock_id,
-                            'name': name,
-                            'reason': "台股主要成分股，具備基本投資價值",
-                            'target_price': target_price,
-                            'stop_loss': stop_loss,
-                            'current_price': current_price
-                        })
-                    except:
-                        # 如果獲取失敗，使用預設值
-                        recommendations.append({
-                            'code': stock_id,
-                            'name': f"{stock_id} (預設)",
-                            'reason': "台股主要成分股，具備基本投資價值",
-                            'target_price': 105,
-                            'stop_loss': 97,
-                            'current_price': 100
-                        })
-                
-                # 如果已經填充足夠，停止
-                if len(recommendations) >= count:
-                    break
-        
-        return recommendations
-
-    @staticmethod
-    def _noon_strategy(count):
-        """中午休盤策略"""
-        # 掃描50檔股票
+        # 如果沒有對應的現有策略，使用通用短線策略
+        # 掃描限制
         scan_limit = 50
         
-        # 獲取活躍股票 - 只執行一次
-        print(f"[stock_recommender] 獲取前{scan_limit}檔熱門股票...")
+        # 獲取熱門股票
         stock_ids = get_top_stocks(limit=scan_limit)
         
-        print(f"[stock_recommender] 分析午盤技術指標...")
+        # 分析技術指標
         tech_results = analyze_technical_indicators(stock_ids)
         
-        sorted_results = sorted([
-            (sid, data) for sid, data in tech_results.items()
-        ], key=lambda x: x[1]['score'], reverse=True)
-        
-        recommendations = []
-        for sid, data in sorted_results[:count]:
-            try:
-                ticker = yf.Ticker(f"{sid}.TW")
-                info = ticker.info
-                name = info.get('shortName', sid)
-                
-                current_price = ticker.history(period="1d")['Close'].iloc[-1]
-                target_price = round(current_price * 1.03, 2)  # 短線目標 3%
-                stop_loss = round(current_price * 0.98, 2)     # 止損點 2%
-                
-                recommendations.append({
-                    'code': sid,
-                    'name': name,
-                    'reason': data['desc'],
-                    'target_price': target_price,
-                    'stop_loss': stop_loss,
-                    'current_price': current_price
-                })
-            except Exception as e:
-                print(f"[stock_recommender] ⚠️ {sid} 處理失敗：{e}")
-        
-        return recommendations
-
-    @staticmethod
-    def _afternoon_strategy(count):
-        """尾盤前推薦策略"""
-        # 掃描50檔股票
-        scan_limit = 50
-        
-        # 獲取活躍股票 - 只執行一次
-        print(f"[stock_recommender] 獲取前{scan_limit}檔熱門股票...")
-        stock_ids = get_top_stocks(limit=scan_limit)
-        
-        print(f"[stock_recommender] 分析尾盤技術指標...")
-        tech_results = analyze_technical_indicators(stock_ids)
-        
-        breakout_candidates = []
-        for sid, data in tech_results.items():
-            if data['score'] >= 5 and "均線" in data['desc'] and "KD" in data['desc']:
-                try:
-                    ticker = yf.Ticker(f"{sid}.TW")
-                    history = ticker.history(period="5d")
-                    
-                    today_volume = history['Volume'].iloc[-1]
-                    avg_volume = history['Volume'].mean()
-                    
-                    if today_volume > avg_volume * 1.2:  # 成交量放大 20%
-                        current_price = history['Close'].iloc[-1]
-                        name = ticker.info.get('shortName', sid)
-                        
-                        breakout_candidates.append({
-                            'code': sid,
-                            'name': name,
-                            'score': data['score'],
-                            'desc': data['desc'],
-                            'current_price': current_price
-                        })
-                except Exception as e:
-                    print(f"[stock_recommender] ⚠️ {sid} 量能檢查失敗：{e}")
-        
-        breakout_candidates.sort(key=lambda x: x['score'], reverse=True)
-        
-        recommendations = []
-        for candidate in breakout_candidates[:count]:
-            target_price = round(candidate['current_price'] * 1.02, 2)  # 短線目標 2%
-            stop_loss = round(candidate['current_price'] * 0.985, 2)    # 止損點 1.5%
-            
-            recommendations.append({
-                'code': candidate['code'],
-                'name': candidate['name'],
-                'reason': f"尾盤突破：{candidate['desc']}，搭配放量",
-                'target_price': target_price,
-                'stop_loss': stop_loss,
-                'current_price': candidate['current_price']
-            })
-        
-        return recommendations
-
-    @staticmethod
-    def _evening_strategy(count):
-        """盤後分析推薦策略"""
-        # 掃描100檔股票
-        scan_limit = 100
-        
-        # 獲取活躍股票 - 只執行一次
-        print(f"[stock_recommender] 獲取前{scan_limit}檔熱門股票...")
-        stock_ids = get_top_stocks(limit=scan_limit)
-        
-        print(f"[stock_recommender] 分析盤後技術指標...")
-        tech_results = analyze_technical_indicators(stock_ids)
-        
-        # 預先獲取 EPS 數據，避免每支股票都重新獲取
-        try:
-            print("[stock_recommender] 一次性獲取 EPS 數據...")
-            eps_data = get_eps_data(use_cache=True, cache_expiry_hours=72)  # 增加緩存有效期
-        except Exception as e:
-            print(f"[stock_recommender] ⚠️ 獲取 EPS 數據失敗: {e}")
-            eps_data = {}
-        
+        # 篩選符合短線條件的股票
         candidates = []
         for sid, data in tech_results.items():
-            if data['score'] >= 5:
+            # 短線條件: RSI > 50、KD 金叉、MACD 翻多、均線支撐
+            if data.get('RSI', 0) > 50 and 'KD黃金交叉' in data.get('desc', '') and data.get('score', 0) >= 3:
                 try:
                     ticker = yf.Ticker(f"{sid}.TW")
                     info = ticker.info
@@ -482,263 +404,172 @@ class StockRecommender:
                     
                     if history.empty:
                         continue
-                    
+                        
                     name = info.get('shortName', sid)
                     current_price = history['Close'].iloc[-1]
                     
-                    # 使用預先獲取的 EPS 數據
-                    eps_info = eps_data.get(sid, {})
-                    eps = eps_info.get('eps', 0)
-                    dividend = eps_info.get('dividend', 0)
-                    
-                    total_score = data['score']
-                    if eps > 5:
-                        total_score += 2
-                    elif eps > 2:
-                        total_score += 1
-                    
-                    if dividend > 4:
-                        total_score += 2
-                    elif dividend > 2:
-                        total_score += 1
+                    # 計算目標價和止損價
+                    target_price = round(current_price * 1.05, 2)  # 上漲5%
+                    stop_loss = round(current_price * 0.97, 2)     # 下跌3%
                     
                     candidates.append({
                         'code': sid,
                         'name': name,
-                        'tech_desc': data['desc'],
-                        'eps': eps,
-                        'dividend': dividend,
-                        'total_score': total_score,
+                        'reason': data.get('desc', '技術指標強勢'),
+                        'target_price': target_price,
+                        'stop_loss': stop_loss,
                         'current_price': current_price
                     })
                 except Exception as e:
-                    print(f"[stock_recommender] ⚠️ {sid} 綜合分析失敗：{e}")
+                    print(f"[stock_recommender] ⚠️ {sid} 短線分析失敗：{e}")
         
-        candidates.sort(key=lambda x: x['total_score'], reverse=True)
+        # 排序並限制數量
+        candidates.sort(key=lambda x: x.get('current_price', 0) / x.get('stop_loss', 1), reverse=True)  # 風險報酬比排序
         
-        recommendations = []
-        for candidate in candidates[:count]:
-            eps_text = f"，EPS: {candidate['eps']}" if candidate['eps'] else ""
-            div_text = f"，股息: {candidate['dividend']}%" if candidate['dividend'] else ""
-            
-            target_price = round(candidate['current_price'] * 1.05, 2)
-            stop_loss = round(candidate['current_price'] * 0.97, 2)
-            
-            recommendations.append({
-                'code': candidate['code'],
-                'name': candidate['name'],
-                'reason': f"明日關注：{candidate['tech_desc']}{eps_text}{div_text}",
-                'target_price': target_price,
-                'stop_loss': stop_loss,
-                'current_price': candidate['current_price']
-            })
-        
-        return recommendations
+        return candidates[:count]
 
     @staticmethod
-    def get_weak_valley_alerts(count=2):
+    def _long_term_strategy(count, time_slot):
         """
-        識別處於極弱谷狀態的股票
-        
-        Args:
-            count (int): 極弱谷股票數量，默認為2
-            
-        Returns:
-            list: 極弱谷股票列表
+        長線推薦策略 (EPS > 2、殖利率 ≥ 4%、本益比 < 15、法人買超、MACD 翻多)
         """
-        print("[stock_recommender] ⏳ 掃描極弱谷股票...")
-        
-        # 檢查緩存
-        cache_file = os.path.join(CACHE_DIR, 'weak_valley_cache.json')
-        if os.path.exists(cache_file):
-            try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    cache_data = json.load(f)
-                    cache_time = datetime.fromisoformat(cache_data['timestamp'])
-                    
-                    # 如果緩存時間不超過12小時，直接使用緩存
-                    if (datetime.now() - cache_time).total_seconds() < 43200:  # 12小時
-                        print(f"[stock_recommender] ✅ 使用緩存的極弱谷警報 (更新於 {cache_time.strftime('%H:%M:%S')})")
-                        return cache_data['weak_valleys']
-            except Exception as e:
-                print(f"[stock_recommender] ⚠️ 讀取極弱谷緩存失敗: {e}")
-        
-        # 從前100檔中尋找極弱谷股票
+        # 掃描限制
         scan_limit = 100
+        
+        # 獲取熱門股票
         stock_ids = get_top_stocks(limit=scan_limit)
-        alerts = []
         
-        max_processing_time = 60  # 最大處理時間60秒
-        start_time = time.time()
+        # 獲取 EPS 和股息數據
+        try:
+            eps_data = get_eps_data(use_cache=True, cache_expiry_hours=72)
+        except Exception as e:
+            print(f"[stock_recommender] ⚠️ 獲取 EPS 數據失敗: {e}")
+            eps_data = {}
         
-        for stock_id in stock_ids[:scan_limit]:
-            # 檢查是否超時
-            if time.time() - start_time > max_processing_time:
-                print(f"[stock_recommender] ⚠️ 極弱谷股票掃描超時，返回部分結果")
-                break
-                
-            try:
-                ticker = yf.Ticker(f"{stock_id}.TW")
-                history = ticker.history(period="60d")
-                
-                if history.empty or len(history) < 20:
-                    continue
-                
-                closes = history['Close'].values
-                
-                # RSI 計算
-                delta = np.diff(closes)
-                up = np.sum([d if d > 0 else 0 for d in delta[-14:]])
-                down = np.sum([abs(d) if d < 0 else 0 for d in delta[-14:]])
-                rsi = 100 - (100 / (1 + (up / (down or 1e-10))))
-                
-                # 均線計算
-                ma_5 = np.mean(closes[-5:])
-                ma_10 = np.mean(closes[-10:])
-                ma_20 = np.mean(closes[-20:])
-                
-                # 連續下跌天數
-                days_falling = sum(1 for i in range(len(closes)-1, 0, -1) 
-                                   if closes[i] < closes[i-1]) 
-                
-                # 判斷極弱谷條件
-                reason = []
-                
-                if rsi < 30:
-                    reason.append(f"RSI={rsi:.1f}處於超賣區間")
-                
-                if closes[-1] < ma_20 * 0.95:
-                    reason.append("股價跌破20日均線5%以上")
-                
-                if days_falling >= 4:
-                    reason.append(f"連續下跌{days_falling}天")
-                
-                # 綜合判斷
-                if len(reason) >= 2:  # 至少滿足兩個條件
-                    name = ticker.info.get('shortName', stock_id)
-                    current_price = closes[-1]
+        # 分析技術指標
+        tech_results = analyze_technical_indicators(stock_ids)
+        
+        # 篩選符合長線條件的股票
+        candidates = []
+        for sid, data in tech_results.items():
+            # 檢查基本面
+            eps_info = eps_data.get(sid, {})
+            eps = eps_info.get('eps', 0)
+            dividend = eps_info.get('dividend', 0)
+            
+            # 長線條件: EPS>2、殖利率≥4%、技術指標良好
+            long_term_score = 0
+            reasons = []
+            
+            # EPS 評分
+            if eps and eps > 5:
+                long_term_score += 2
+                reasons.append(f"EPS {eps} 元優異")
+            elif eps and eps > 2:
+                long_term_score += 1
+                reasons.append(f"EPS {eps} 元良好")
+            
+            # 股息率評分
+            if dividend and dividend >= 4:
+                long_term_score += 2
+                reasons.append(f"殖利率 {dividend}% 豐厚")
+            elif dividend and dividend >= 2.5:
+                long_term_score += 1
+                reasons.append(f"殖利率 {dividend}% 不錯")
+            
+            # 技術面評分
+            if data.get('score', 0) >= 4:
+                long_term_score += 2
+                reasons.append(data.get('desc', '技術指標強勢'))
+            elif data.get('score', 0) >= 2:
+                long_term_score += 1
+                reasons.append(data.get('desc', '技術指標尚可'))
+            
+            # 評分達標才納入候選
+            if long_term_score >= 3:
+                try:
+                    ticker = yf.Ticker(f"{sid}.TW")
+                    info = ticker.info
+                    history = ticker.history(period="1mo")
                     
-                    alerts.append({
-                        'code': stock_id,
+                    if history.empty:
+                        continue
+                        
+                    name = info.get('shortName', sid)
+                    current_price = history['Close'].iloc[-1]
+                    
+                    # 獲取本益比
+                    pe_ratio = info.get('trailingPE')
+                    if pe_ratio and pe_ratio < 15:
+                        long_term_score += 1
+                        reasons.append(f"本益比 {pe_ratio:.1f} 合理")
+                    
+                    # 計算目標價和止損價
+                    target_price = round(current_price * 1.15, 2)  # 上漲15%
+                    stop_loss = round(current_price * 0.90, 2)     # 下跌10%
+                    
+                    candidates.append({
+                        'code': sid,
                         'name': name,
+                        'reason': "、".join(reasons),
+                        'target_price': target_price,
+                        'stop_loss': stop_loss,
                         'current_price': current_price,
-                        'alert_reason': "、".join(reason)
+                        'score': long_term_score
                     })
-                    
-                    # 如果已找到足夠數量的極弱谷股票，則提前結束
-                    if len(alerts) >= count:
-                        break
-                
-            except Exception as e:
-                print(f"[stock_recommender] ⚠️ {stock_id} 極弱谷判斷失敗：{e}")
+                except Exception as e:
+                    print(f"[stock_recommender] ⚠️ {sid} 長線分析失敗：{e}")
         
-        # 儲存結果到緩存
-        if alerts:
-            try:
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    cache_data = {
-                        'timestamp': datetime.now().isoformat(),
-                        'weak_valleys': alerts
-                    }
-                    json.dump(cache_data, f, ensure_ascii=False, indent=2)
-                print(f"[stock_recommender] ✅ 已緩存極弱谷警報結果")
-            except Exception as e:
-                print(f"[stock_recommender] ⚠️ 寫入極弱谷緩存失敗: {e}")
+        # 排序並限制數量
+        candidates.sort(key=lambda x: x.get('score', 0), reverse=True)
         
-        # 返回指定數量的極弱谷股票
-        return alerts[:count]
+        return candidates[:count]
 
-    @staticmethod
-    def send_recommendations_to_user(user_id, stocks, time_slot):
-        """
-        發送股票推薦訊息
-        
-        Args:
-            user_id (str): 用戶ID
-            stocks (list): 推薦股票列表
-            time_slot (str): 時段名稱
-        """
-        if not stocks:
-            message = f"【{time_slot}推薦股票】\n\n沒有符合條件的推薦股票"
-            send_line_bot_message(message)
-            return
-        
-        message = f"【{time_slot}推薦股票】\n\n"
-        for stock in stocks:
-            message += f"📈 {stock['code']} {stock['name']}\n"
-            message += f"推薦理由: {stock['reason']}\n"
-            message += f"目標價: {stock['target_price']}\n"
-            message += f"止損價: {stock['stop_loss']}\n\n"
-        
-        send_line_bot_message(message)
 
-    @staticmethod
-    def send_weak_valley_alerts_to_user(user_id, weak_valleys):
-        """
-        發送極弱谷警報訊息
-        
-        Args:
-            user_id (str): 用戶ID
-            weak_valleys (list): 極弱谷股票列表
-        """
-        if not weak_valleys:
-            return
-        
-        message = "【極弱谷警報】\n\n"
-        for stock in weak_valleys:
-            message += f"⚠️ {stock['code']} {stock['name']}\n"
-            message += f"當前價格: {stock['current_price']}\n"
-            message += f"警報原因: {stock['alert_reason']}\n\n"
-        
-        message += "註：極弱谷表示股票處於超賣狀態，可以觀察反彈機會，但要注意風險控制。"
-        
-        send_line_bot_message(message)
-
-# 快速訪問的別名函數
-def get_stock_recommendations(time_slot, count=None):
+def get_stock_recommendations(time_slot="morning", count=3):
     """
-    快速獲取股票推薦的便捷函數
+    獲取股票推薦的便捷函數
     
     Args:
         time_slot (str): 時段 ('morning', 'noon', 'afternoon', 'evening')
-        count (int): 推薦股票數量，None 表示使用預設值
+        count (int): 推薦股票數量
     
     Returns:
         list: 推薦股票列表
     """
-    return StockRecommender.get_stock_recommendations(time_slot, count)
+    existing_strategies = {
+        'morning': StockRecommender._morning_strategy,
+        'noon': StockRecommender._noon_strategy,
+        'afternoon': StockRecommender._afternoon_strategy,
+        'evening': StockRecommender._evening_strategy
+    }
+    
+    strategy_func = existing_strategies.get(time_slot, StockRecommender._morning_strategy)
+    return strategy_func(count)
 
-def get_weak_valley_alerts(count=2):
+
+def get_multi_strategy_recommendations(time_slot="morning", count=None):
     """
-    快速獲取極弱谷股票警報的便捷函數
+    獲取多策略股票推薦的便捷函數
     
     Args:
-        count (int): 極弱谷股票數量，默認為2
-        
+        time_slot (str): 時段 ('morning', 'noon', 'afternoon', 'evening')
+        count (int): 每種策略的推薦股票數量
+    
     Returns:
-        list: 極弱谷股票列表
+        dict: 包含三種策略的推薦股票字典
+    """
+    return StockRecommender.get_multi_strategy_recommendations(time_slot, count)
+
+
+def get_weak_stock_alerts(count=2):
+    """
+    獲取極弱股警示的便捷函數
+    
+    Args:
+        count (int): 警示股票數量
+    
+    Returns:
+        list: 極弱股警示列表
     """
     return StockRecommender.get_weak_valley_alerts(count)
-
-def send_recommendations_to_user(user_id, stocks, time_slot):
-    """
-    發送股票推薦訊息的便捷函數
-    
-    Args:
-        user_id (str): 用戶ID
-        stocks (list): 推薦股票列表
-        time_slot (str): 時段
-    """
-    StockRecommender.send_recommendations_to_user(user_id, stocks, time_slot)
-
-def send_weak_valley_alerts_to_user(user_id, weak_valleys):
-    """
-    發送極弱谷提醒的便捷函數
-    
-    Args:
-        user_id (str): 用戶ID
-        weak_valleys (list): 極弱谷股票列表
-    """
-    StockRecommender.send_weak_valley_alerts_to_user(user_id, weak_valleys)
-
-print("[recommender] ✅ 已載入最新版")
