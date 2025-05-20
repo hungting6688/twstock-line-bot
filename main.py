@@ -1,5 +1,5 @@
 """
-更新 main.py 以使用雙重通知系統
+更新 main.py 以使用雙重通知系統，並將極弱谷警報限制為每日僅發送一次（早盤前）
 """
 
 #!/usr/bin/env python3
@@ -72,6 +72,7 @@ def morning_push():
         def run_recommendations():
             try:
                 result["stocks"] = get_stock_recommendations('morning')
+                # 只在早盤前獲取極弱谷股票警報
                 result["weak_valleys"] = get_weak_valley_alerts(2)
                 result["completed"] = True
             except Exception as e:
@@ -98,6 +99,8 @@ def morning_push():
         
         # 使用雙重通知系統
         send_stock_recommendations(stocks, "早盤前")
+        
+        # 只在早盤前發送極弱谷警報
         if weak_valleys:
             send_weak_valley_alerts(weak_valleys)
             
@@ -113,12 +116,12 @@ def noon_push():
     print("[main] ⏳ 執行中午休盤推播...")
     try:
         # 添加超時控制
-        result = {"stocks": None, "weak_valleys": None, "completed": False}
+        result = {"stocks": None, "completed": False}
         
         def run_recommendations():
             try:
                 result["stocks"] = get_stock_recommendations('noon')
-                result["weak_valleys"] = get_weak_valley_alerts(2)
+                # 不再獲取極弱谷股票警報，統一由早盤前發送
                 result["completed"] = True
             except Exception as e:
                 print(f"[main] ⚠️ 推薦分析過程中出錯：{e}")
@@ -140,12 +143,9 @@ def noon_push():
             raise TimeoutError("推薦分析超時")
         
         stocks = result["stocks"]
-        weak_valleys = result["weak_valleys"]
         
-        # 使用雙重通知系統
+        # 使用雙重通知系統，僅發送股票推薦
         send_stock_recommendations(stocks, "中午休盤時")
-        if weak_valleys:
-            send_weak_valley_alerts(weak_valleys)
             
         print("[main] ✅ 中午休盤推播完成")
     except Exception as e:
@@ -159,12 +159,12 @@ def afternoon_push():
     print("[main] ⏳ 執行尾盤前推播...")
     try:
         # 添加超時控制
-        result = {"stocks": None, "weak_valleys": None, "completed": False}
+        result = {"stocks": None, "completed": False}
         
         def run_recommendations():
             try:
                 result["stocks"] = get_stock_recommendations('afternoon')
-                result["weak_valleys"] = get_weak_valley_alerts(2)
+                # 不再獲取極弱谷股票警報，統一由早盤前發送
                 result["completed"] = True
             except Exception as e:
                 print(f"[main] ⚠️ 推薦分析過程中出錯：{e}")
@@ -186,12 +186,9 @@ def afternoon_push():
             raise TimeoutError("推薦分析超時")
         
         stocks = result["stocks"]
-        weak_valleys = result["weak_valleys"]
         
-        # 使用雙重通知系統
+        # 使用雙重通知系統，僅發送股票推薦
         send_stock_recommendations(stocks, "尾盤前")
-        if weak_valleys:
-            send_weak_valley_alerts(weak_valleys)
             
         print("[main] ✅ 尾盤前推播完成")
     except Exception as e:
