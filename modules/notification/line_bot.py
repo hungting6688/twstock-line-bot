@@ -1,5 +1,5 @@
 """
-修復版 LINE Bot 模組 - 增強錯誤處理和重試機制
+改進的 LINE Bot 模組 - 增強穩定性和錯誤處理
 """
 print("[line_bot] ✅ 已載入最新版")
 
@@ -7,11 +7,31 @@ import requests
 import os
 import time
 import random
+import json
 
 # 從環境變數獲取 LINE Bot 設定
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_USER_ID = os.getenv("LINE_USER_ID")
 
+# 嘗試讀取已知的最近發送錯誤狀態
+try:
+    LINE_ERROR_STATE_FILE = os.path.join(os.path.dirname(__file__), '../../cache/line_error_state.json')
+    os.makedirs(os.path.dirname(LINE_ERROR_STATE_FILE), exist_ok=True)
+    if os.path.exists(LINE_ERROR_STATE_FILE):
+        with open(LINE_ERROR_STATE_FILE, 'r') as f:
+            line_error_state = json.load(f)
+    else:
+        line_error_state = {
+            "last_error": None,
+            "error_count": 0,
+            "last_error_time": None
+        }
+except:
+    line_error_state = {
+        "last_error": None,
+        "error_count": 0,
+        "last_error_time": None
+    }
 
 def send_line_bot_message(message: str, max_retries=2):
     """
@@ -27,10 +47,30 @@ def send_line_bot_message(message: str, max_retries=2):
     拋出:
     - Exception: 發送失敗時拋出例外，包含詳細錯誤訊息
     """
+    global line_error_state
+    
+    # 檢查環境變數
     if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_USER_ID:
         error_msg = "[line_bot] ❌ 缺少 LINE Token 或 User ID，無法推播"
         print(error_msg)
+        
+        # 記錄錯誤
+        line_error_state["last_error"] = "MISSING_CREDENTIALS"
+        line_error_state["error_count"] += 1
+        line_error_state["last_error_time"] = time.time()
+        try:
+            with open(LINE_ERROR_STATE_FILE, 'w') as f:
+                json.dump(line_error_state, f)
+        except:
+            pass
+            
         raise Exception(error_msg)
+
+    # 檢查訊息長度，如果超過 LINE 的限制（5000 字元），進行截斷
+    if len(message) > 4900:  # 留一些緩衝區
+        original_message = message
+        message = message[:4800] + "\n...\n(訊息已截斷，詳情請查看電子郵件)"
+        print(f"[line_bot] ⚠️ 訊息過長({len(original_message)}字元)，已截斷至 4800 字元")
 
     headers = {
         "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
@@ -54,20 +94,46 @@ def send_line_bot_message(message: str, max_retries=2):
                 "https://api.line.me/v2/bot/message/push", 
                 headers=headers, 
                 json=payload, 
-                timeout=30
+                timeout=30  # 增加超時時間
             )
+            
+            response_body = response.text
             
             if response.status_code == 200:
                 print("[line_bot] ✅ LINE 訊息推播成功")
+                
+                # 重置錯誤計數器
+                line_error_state["last_error"] = None
+                line_error_state["error_count"] = 0
+                line_error_state["last_error_time"] = None
+                try:
+                    with open(LINE_ERROR_STATE_FILE, 'w') as f:
+                        json.dump(line_error_state, f)
+                except:
+                    pass
+                    
                 return True
             
             # 處理特定錯誤碼
             if response.status_code == 429:  # Too Many Requests 錯誤
                 error_msg = f"[line_bot] ❌ 推播失敗：429 - 達到速率限制或月度配額"
                 print(error_msg)
+                
+                # 記錄錯誤
+                line_error_state["last_error"] = "RATE_LIMIT"
+                line_error_state["error_count"] += 1
+                line_error_state["last_error_time"] = time.time()
+                try:
+                    with open(LINE_ERROR_STATE_FILE, 'w') as f:
+                        json.dump(line_error_state, f)
+                except:
+                    pass
+                
                 # 如果已達到最大重試次數，則拋出異常
                 if attempt >= max_retries:
-                    raise Exception(error_msg + f" - 內容: {response.text}")
+                    full_error = f"{error_msg} - 內容: {response_body}"
+                    raise Exception(full_error)
+                
                 # 等待較長時間後重試
                 wait_time = 5 * (attempt + 1)
                 print(f"[line_bot] ⏳ 等待 {wait_time} 秒後重試 ({attempt+1}/{max_retries})...")
@@ -75,8 +141,18 @@ def send_line_bot_message(message: str, max_retries=2):
                 continue
             
             # 其他錯誤
-            error_msg = f"[line_bot] ❌ 推播失敗：{response.status_code} - {response.text}"
+            error_msg = f"[line_bot] ❌ 推播失敗：{response.status_code} - {response_body}"
             print(error_msg)
+            
+            # 記錄錯誤
+            line_error_state["last_error"] = f"HTTP_{response.status_code}"
+            line_error_state["error_count"] += 1
+            line_error_state["last_error_time"] = time.time()
+            try:
+                with open(LINE_ERROR_STATE_FILE, 'w') as f:
+                    json.dump(line_error_state, f)
+            except:
+                pass
             
             # 如果已達到最大重試次數，則拋出異常
             if attempt >= max_retries:
@@ -92,6 +168,16 @@ def send_line_bot_message(message: str, max_retries=2):
             error_msg = f"[line_bot] ❌ 推播過程發生網絡錯誤：{e}"
             print(error_msg)
             
+            # 記錄錯誤
+            line_error_state["last_error"] = "NETWORK_ERROR"
+            line_error_state["error_count"] += 1
+            line_error_state["last_error_time"] = time.time()
+            try:
+                with open(LINE_ERROR_STATE_FILE, 'w') as f:
+                    json.dump(line_error_state, f)
+            except:
+                pass
+            
             # 如果已達到最大重試次數，則拋出異常
             if attempt >= max_retries:
                 raise Exception(error_msg)
@@ -104,6 +190,65 @@ def send_line_bot_message(message: str, max_retries=2):
     # 如果所有重試都失敗
     raise Exception("[line_bot] ❌ 所有重試嘗試均失敗")
 
+
+def check_line_service_status():
+    """
+    檢查 LINE Bot 服務狀態
+    
+    返回:
+    - dict: 服務狀態信息
+    """
+    global line_error_state
+    
+    # 檢查是否有可用的憑據
+    if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_USER_ID:
+        return {
+            "status": "unavailable",
+            "reason": "missing_credentials",
+            "message": "缺少 LINE Bot 認證資訊"
+        }
+    
+    # 檢查最近錯誤狀態
+    if line_error_state["last_error"] == "RATE_LIMIT" and line_error_state["last_error_time"]:
+        # 檢查是否在1小時內發生過速率限制錯誤
+        if time.time() - line_error_state["last_error_time"] < 3600:
+            return {
+                "status": "limited",
+                "reason": "rate_limit",
+                "message": "LINE Bot 正在速率限制中",
+                "error_count": line_error_state["error_count"]
+            }
+    
+    # 檢查服務狀態 - 發送一個簡單的 GET 請求檢查 API 是否可用
+    try:
+        headers = {
+            "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
+        }
+        
+        response = requests.get(
+            "https://api.line.me/v2/bot/info", 
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            return {
+                "status": "available",
+                "message": "LINE Bot 服務正常"
+            }
+        else:
+            return {
+                "status": "error",
+                "reason": f"http_{response.status_code}",
+                "message": f"LINE Bot API 返回錯誤: {response.status_code}",
+                "details": response.text
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "reason": "connection_error",
+            "message": f"LINE Bot 連接錯誤: {str(e)}"
+        }
 
 def send_stock_recommendation(user_id, stocks, time_slot):
     """
@@ -145,6 +290,8 @@ def send_weak_valley_alerts(user_id, weak_valleys):
         message += f"⚠️ {stock['code']} {stock['name']}\n"
         message += f"當前價格: {stock['current_price']}\n"
         message += f"警報原因: {stock['alert_reason']}\n\n"
+    
+    message += "註：極弱谷表示股票處於超賣狀態，可以觀察反彈機會，但要注意風險控制。"
     
     send_line_bot_message(message)
 
