@@ -1,6 +1,6 @@
 """
 改用 yfinance 獲取 EPS 和股息數據的替代實現
-增強版處理 API 速率限制和連接失敗問題
+增強版處理 API 速率限制和連接失敗問題 (2025版)
 """
 
 import yfinance as yf
@@ -19,16 +19,22 @@ from datetime import datetime, timedelta
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '../../cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# 隨機化的 User-Agent 列表
+# 全局配置參數 - 從環境變量獲取或使用默認值
+MAX_RETRIES = int(os.getenv("YAHOO_FINANCE_RETRY_ATTEMPTS", "5"))
+CONNECTION_TIMEOUT = int(os.getenv("YAHOO_FINANCE_CONNECTION_TIMEOUT", "10"))
+READ_TIMEOUT = int(os.getenv("YAHOO_FINANCE_READ_TIMEOUT", "15"))
+BATCH_DELAY = float(os.getenv("YAHOO_FINANCE_BATCH_DELAY", "5"))
+
+# 隨機化的 User-Agent 列表 - 加入更多現代化的選項
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36 Edg/92.0.902.67",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (iPad; CPU OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 ]
 
 # 關鍵股票清單 - 優先處理這些股票
@@ -36,6 +42,11 @@ PRIORITY_STOCKS = [
     "2330", "2317", "2454", "2412", "2303", "2308", "2882", "2881", 
     "1301", "1303", "2002", "2886", "1216", "2891", "3711", "2327"
 ]
+
+# 等待時間配置 - 添加這些常量以便於調整
+MIN_WAIT_TIME = 1.0      # 最小等待時間(秒)
+RATE_LIMIT_WAIT = 30.0   # 速率限制後的等待時間(秒)
+ERROR_WAIT_BASE = 2.0    # 一般錯誤的基礎等待時間(秒)
 
 def test_yahoo_finance_connection():
     """
@@ -50,13 +61,14 @@ def test_yahoo_finance_connection():
             "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Connection": "keep-alive"
+            "Connection": "keep-alive",
+            "Cache-Control": "max-age=0"
         }
         
         # 直接測試 Yahoo Finance 網站
         response = requests.get("https://finance.yahoo.com/quote/AAPL", 
                               headers=headers, 
-                              timeout=10)
+                              timeout=(CONNECTION_TIMEOUT, READ_TIMEOUT))
         
         if response.status_code == 200:
             print("[finance_yahoo] ✅ Yahoo Finance API 連接測試成功")
@@ -69,7 +81,7 @@ def test_yahoo_finance_connection():
         print(f"[finance_yahoo] ❌ Yahoo Finance API 連接測試失敗: {e}")
         return False
 
-def get_eps_data_alternative(use_cache=True, cache_expiry_hours=72, max_stocks=80, timeout=20):
+def get_eps_data_alternative(use_cache=True, cache_expiry_hours=72, max_stocks=80, timeout=20, batch_size=5, batch_delay=None):
     """
     使用 yfinance 替代方案獲取 EPS 和股息數據，優化超時和並行處理
     
@@ -78,10 +90,16 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=72, max_stocks=8
     - cache_expiry_hours: 緩存有效時間（小時）
     - max_stocks: 最多處理的股票數量
     - timeout: 單個股票處理的超時時間(秒)
+    - batch_size: 批處理大小
+    - batch_delay: 批次間延遲時間(秒)，None表示使用環境變量或默認值
     
     返回:
     - 字典: {stock_id: {"eps": value, "dividend": value}}
     """
+    # 如果未指定批次延遲，使用環境變量或默認值
+    if batch_delay is None:
+        batch_delay = BATCH_DELAY
+    
     # 檢查緩存 - 延長緩存有效期至72小時
     cache_file = os.path.join(CACHE_DIR, 'eps_data_cache.json')
     if use_cache and os.path.exists(cache_file):
@@ -157,15 +175,14 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=72, max_stocks=8
     
     # 優先處理常見大型股
     result = {}
-    stocks_to_process = []
     
     # 1. 首先處理優先股票
     priority_stocks = [s for s in PRIORITY_STOCKS if s in top_stocks]
     print(f"[finance_yahoo] 優先處理 {len(priority_stocks)} 檔重要股票")
     
-    # 使用多線程並行處理優先股票
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(fetch_single_stock_data_with_retry, stock_id, 2, timeout): stock_id for stock_id in priority_stocks}
+    # 使用多線程並行處理優先股票，但限制並行數
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(fetch_single_stock_data_with_retry, stock_id, 3, timeout): stock_id for stock_id in priority_stocks}
         
         for future in concurrent.futures.as_completed(futures):
             stock_id = futures[future]
@@ -185,14 +202,13 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=72, max_stocks=8
     
     print(f"[finance_yahoo] 處理剩餘 {len(remaining_to_process)} 檔股票")
     
-    # 分批處理，每批5檔
-    batch_size = 5
+    # 分批處理，批次大小由參數控制
     for i in range(0, len(remaining_to_process), batch_size):
         batch = remaining_to_process[i:i+batch_size]
         print(f"[finance_yahoo] 處理批次 {i//batch_size + 1}/{(len(remaining_to_process)-1)//batch_size + 1} ({len(batch)} 檔股票)")
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(fetch_single_stock_data_with_retry, stock_id, 1, timeout): stock_id for stock_id in batch}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
+            futures = {executor.submit(fetch_single_stock_data_with_retry, stock_id, 2, timeout): stock_id for stock_id in batch}
             
             for future in concurrent.futures.as_completed(futures):
                 stock_id = futures[future]
@@ -210,7 +226,7 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=72, max_stocks=8
         
         # 批次間添加延遲，避免 API 限制
         if i + batch_size < len(remaining_to_process):
-            delay = 2.0 + random.uniform(0.5, 1.0)
+            delay = batch_delay + random.uniform(0.5, 1.5)
             print(f"[finance_yahoo] 等待 {delay:.1f} 秒後處理下一批...")
             time.sleep(delay)
     
@@ -281,14 +297,23 @@ def fetch_single_stock_data_with_retry(stock_id, max_retries=2, timeout=20):
     """    
     # 立即檢查是否為優先股票，調整最大重試次數
     if stock_id in PRIORITY_STOCKS:
-        max_retries = max(max_retries, 2)  # 優先股最少2次重試
+        max_retries = max(max_retries, 3)  # 優先股最少3次重試
+    
+    # 保存已經發生的錯誤類型
+    encountered_errors = []
     
     for retry in range(max_retries):
         try:
             # 每次重試增加延遲，且添加隨機抖動以避免請求同步
             if retry > 0:
-                # 指數退避：基礎延遲 * (2^重試次數) + 隨機抖動
-                delay = (2 ** retry) + random.uniform(0.5, 1.0)
+                # 計算等待時間 - 指數退避
+                if "Too Many Requests" in " ".join(encountered_errors) or "429" in " ".join(encountered_errors):
+                    # 對於速率限制錯誤，使用更長的等待時間
+                    delay = RATE_LIMIT_WAIT + random.uniform(0, 5.0)
+                else:
+                    # 一般錯誤的指數退避
+                    delay = ERROR_WAIT_BASE * (2 ** retry) + random.uniform(0.5, 2.0)
+                
                 print(f"[finance_yahoo] ⏳ {stock_id} 重試 ({retry+1}/{max_retries})，等待 {delay:.1f} 秒...")
                 time.sleep(delay)
             
@@ -296,12 +321,22 @@ def fetch_single_stock_data_with_retry(stock_id, max_retries=2, timeout=20):
             return fetch_single_stock_data(stock_id, timeout)
             
         except Exception as e:
-            if "Too Many Requests" in str(e) or "401" in str(e) or "timed out" in str(e).lower():
-                if retry < max_retries - 1:
-                    continue  # 繼續重試
+            error_str = str(e)
+            encountered_errors.append(error_str)
             
-            if retry == max_retries - 1:
-                print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗: {e}")
+            if "Too Many Requests" in error_str or "429" in error_str:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 遇到速率限制 (429 Too Many Requests)")
+            elif "timed out" in error_str.lower():
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求超時")
+            else:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}")
+            
+            # 如果還有重試機會，繼續下一次重試
+            if retry < max_retries - 1:
+                continue
+            
+            # 已達到最大重試次數
+            print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗，已重試 {max_retries} 次")
             
     # 如果所有重試都失敗，返回默認值
     return {"eps": None, "dividend": None}
@@ -322,15 +357,16 @@ def fetch_single_stock_data(stock_id, timeout=20):
         start_time = time.time()
         ticker = yf.Ticker(f"{stock_id}.TW")
         
-        # 使用更短的超時時間獲取信息
-        remaining_timeout = max(1, timeout - (time.time() - start_time))
-        
-        # 使用不同的方式獲取股息和 EPS 數據
+        # 使用分階段獲取信息，確保在超時前盡可能取得更多數據
         info = None
         eps = None
         dividend_yield = None
         
+        # 第一階段：獲取基本信息
         try:
+            # 計算剩餘超時時間
+            remaining_timeout = max(1, timeout - (time.time() - start_time))
+            
             # 获取基本信息
             info = ticker.info
             
@@ -350,22 +386,22 @@ def fetch_single_stock_data(stock_id, timeout=20):
                         dividend_yield = None
                 else:
                     dividend_yield = None
-            else:
-                # 如果无法获取 info，尝试直接获取股息数据
-                if time.time() - start_time < timeout * 0.7:  # 还有足够时间
-                    try:
-                        dividends = ticker.dividends
-                        if not dividends.empty:
-                            latest_dividend = dividends.iloc[-1]
-                            history = ticker.history(period="1mo")
-                            if not history.empty:
-                                latest_price = history['Close'].iloc[-1]
-                                if latest_price > 0:
-                                    dividend_yield = round((latest_dividend / latest_price) * 100, 2)
-                    except:
-                        pass
         except Exception as e:
-            print(f"[finance_yahoo] ⚠️ {stock_id} 獲取 Yahoo Finance 數據失敗: {e}")
+            print(f"[finance_yahoo] ⚠️ {stock_id} 獲取基本信息失敗: {e}")
+        
+        # 第二階段：如果仍有足夠時間且沒有獲取到股息，嘗試獲取股息歷史
+        if dividend_yield is None and (time.time() - start_time) < timeout * 0.7:
+            try:
+                dividends = ticker.dividends
+                if not dividends.empty:
+                    latest_dividend = dividends.iloc[-1]
+                    history = ticker.history(period="1mo")
+                    if not history.empty:
+                        latest_price = history['Close'].iloc[-1]
+                        if latest_price > 0:
+                            dividend_yield = round((latest_dividend / latest_price) * 100, 2)
+            except Exception as e:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 獲取股息歷史失敗: {e}")
         
         # 返回數據
         return {
@@ -374,7 +410,7 @@ def fetch_single_stock_data(stock_id, timeout=20):
         }
     except Exception as e:
         # 如果是速率限制或授權錯誤，向上拋出以觸發重試
-        if "Too Many Requests" in str(e) or "401" in str(e) or "timed out" in str(e).lower():
+        if "Too Many Requests" in str(e) or "429" in str(e) or "401" in str(e) or "timed out" in str(e).lower():
             raise
         
         print(f"[finance_yahoo] ⚠️ {stock_id} 處理失敗: {e}")
@@ -407,7 +443,7 @@ def get_dividend_data_alternative(use_cache=True, cache_expiry_hours=72):
             print(f"[finance_yahoo] ⚠️ 讀取股息緩存失敗: {e}")
     
     # 獲取完整數據
-    eps_data = get_eps_data_alternative(use_cache, cache_expiry_hours)
+    eps_data = get_eps_data_alternative(use_cache, cache_expiry_hours, batch_size=3)
     
     # 提取股息數據
     dividend_data = {sid: val["dividend"] for sid, val in eps_data.items() if val["dividend"] is not None}
@@ -428,7 +464,7 @@ def get_dividend_data_alternative(use_cache=True, cache_expiry_hours=72):
     return dividend_data
 
 def get_backup_stock_list():
-    """提供備用的上市股票列表"""
+    """提供備用的上市股票列表 - 2025年更新版"""
     backup_stocks = [
         {"stock_id": "2330", "stock_name": "台積電", "market_type": "上市", "industry": "半導體業"},
         {"stock_id": "2317", "stock_name": "鴻海", "market_type": "上市", "industry": "電子零組件業"},
@@ -449,7 +485,17 @@ def get_backup_stock_list():
         {"stock_id": "2327", "stock_name": "國巨", "market_type": "上市", "industry": "電子零組件業"},
         {"stock_id": "2912", "stock_name": "統一超", "market_type": "上市", "industry": "貿易百貨"},
         {"stock_id": "2207", "stock_name": "和泰車", "market_type": "上市", "industry": "汽車工業"},
-        {"stock_id": "2884", "stock_name": "玉山金", "market_type": "上市", "industry": "金融業"}
+        {"stock_id": "2884", "stock_name": "玉山金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "2382", "stock_name": "廣達", "market_type": "上市", "industry": "電腦及週邊設備業"},
+        {"stock_id": "2609", "stock_name": "陽明", "market_type": "上市", "industry": "航運業"},
+        {"stock_id": "6505", "stock_name": "台塑化", "market_type": "上市", "industry": "石油、煤製品業"},
+        {"stock_id": "2892", "stock_name": "第一金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "2887", "stock_name": "台新金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "2345", "stock_name": "智邦", "market_type": "上市", "industry": "通信網路業"},
+        {"stock_id": "3008", "stock_name": "大立光", "market_type": "上市", "industry": "光電業"},
+        {"stock_id": "2615", "stock_name": "萬海", "market_type": "上市", "industry": "航運業"},
+        {"stock_id": "5880", "stock_name": "合庫金", "market_type": "上市", "industry": "金融業"},
+        {"stock_id": "3045", "stock_name": "台灣大", "market_type": "上市", "industry": "電信業"}
     ]
     return backup_stocks
 
@@ -465,13 +511,23 @@ def get_stock_info(stock_id, retry_on_rate_limit=True, timeout=15):
     返回:
     - 股票資訊字典
     """
-    max_retries = 2 if retry_on_rate_limit else 1
+    max_retries = MAX_RETRIES if retry_on_rate_limit else 1
+    
+    # 保存已經發生的錯誤類型
+    encountered_errors = []
     
     for retry in range(max_retries):
         try:
-            # 添加隨機延遲，避免過於頻繁的請求
+            # 每次重試增加延遲
             if retry > 0:
-                delay = (2 ** retry) * 1.5 + random.uniform(0.5, 2.0)
+                # 計算等待時間 - 指數退避
+                if "Too Many Requests" in " ".join(encountered_errors) or "429" in " ".join(encountered_errors):
+                    # 對於速率限制錯誤，使用更長的等待時間
+                    delay = RATE_LIMIT_WAIT + random.uniform(0, 5.0)
+                else:
+                    # 一般錯誤的指數退避
+                    delay = ERROR_WAIT_BASE * (2 ** retry) + random.uniform(0.5, 2.0)
+                
                 time.sleep(delay)
             
             ticker = yf.Ticker(f"{stock_id}.TW")
@@ -483,6 +539,7 @@ def get_stock_info(stock_id, retry_on_rate_limit=True, timeout=15):
             # 檢查是否獲得有效數據
             if not info or len(info) < 5:
                 print(f"[finance_yahoo] ⚠️ {stock_id} 獲取的信息不完整")
+                encountered_errors.append("Incomplete info")
                 if retry < max_retries - 1:
                     continue
                 return None
@@ -490,17 +547,19 @@ def get_stock_info(stock_id, retry_on_rate_limit=True, timeout=15):
             return info
             
         except Exception as e:
-            if ("Too Many Requests" in str(e) or "401" in str(e)) and retry < max_retries - 1:
-                wait_time = (2 ** retry) * 3 + random.uniform(0.5, 2.0)
-                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}，等待 {wait_time:.1f} 秒後重試...")
-                time.sleep(wait_time)
-            elif retry < max_retries - 1:
-                wait_time = (2 ** retry) * 1.5 + random.uniform(0.2, 1.0)
-                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}，等待 {wait_time:.1f} 秒後重試...")
-                time.sleep(wait_time)
+            error_str = str(e)
+            encountered_errors.append(error_str)
+            
+            if "Too Many Requests" in error_str or "429" in error_str:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 遇到速率限制 (429 Too Many Requests)")
             else:
-                print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗: {e}")
-                return None
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}")
+            
+            # 如果還有重試機會，繼續下一次重試
+            if retry < max_retries - 1:
+                continue
+                
+            print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗，已重試 {max_retries} 次")
     
     return None
 
@@ -517,13 +576,23 @@ def get_stock_price_history(stock_id, period="60d", retry_on_rate_limit=True, ti
     返回:
     - 價格歷史 DataFrame
     """
-    max_retries = 2 if retry_on_rate_limit else 1
+    max_retries = MAX_RETRIES if retry_on_rate_limit else 1
+    
+    # 保存已經發生的錯誤類型
+    encountered_errors = []
     
     for retry in range(max_retries):
         try:
-            # 添加隨機延遲，避免過於頻繁的請求
+            # 每次重試增加延遲
             if retry > 0:
-                delay = (2 ** retry) * 1.5 + random.uniform(0.5, 2.0)
+                # 計算等待時間 - 指數退避
+                if "Too Many Requests" in " ".join(encountered_errors) or "429" in " ".join(encountered_errors):
+                    # 對於速率限制錯誤，使用更長的等待時間
+                    delay = RATE_LIMIT_WAIT + random.uniform(0, 5.0)
+                else:
+                    # 一般錯誤的指數退避
+                    delay = ERROR_WAIT_BASE * (2 ** retry) + random.uniform(0.5, 2.0)
+                
                 time.sleep(delay)
             
             ticker = yf.Ticker(f"{stock_id}.TW")
@@ -535,6 +604,7 @@ def get_stock_price_history(stock_id, period="60d", retry_on_rate_limit=True, ti
             # 檢查是否獲得有效數據
             if history.empty:
                 print(f"[finance_yahoo] ⚠️ {stock_id} 無法獲取歷史數據")
+                encountered_errors.append("Empty history")
                 if retry < max_retries - 1:
                     continue
                 return pd.DataFrame()
@@ -542,17 +612,19 @@ def get_stock_price_history(stock_id, period="60d", retry_on_rate_limit=True, ti
             return history
                 
         except Exception as e:
-            if ("Too Many Requests" in str(e) or "401" in str(e)) and retry < max_retries - 1:
-                wait_time = (2 ** retry) * 3 + random.uniform(0.5, 2.0)
-                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}，等待 {wait_time:.1f} 秒後重試...")
-                time.sleep(wait_time)
-            elif retry < max_retries - 1:
-                wait_time = (2 ** retry) * 1.5 + random.uniform(0.2, 1.0)
-                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}，等待 {wait_time:.1f} 秒後重試...")
-                time.sleep(wait_time)
+            error_str = str(e)
+            encountered_errors.append(error_str)
+            
+            if "Too Many Requests" in error_str or "429" in error_str:
+                print(f"[finance_yahoo] ⚠️ {stock_id} 遇到速率限制 (429 Too Many Requests)")
             else:
-                print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗: {e}")
-                return pd.DataFrame()
+                print(f"[finance_yahoo] ⚠️ {stock_id} 請求失敗: {e}")
+            
+            # 如果還有重試機會，繼續下一次重試
+            if retry < max_retries - 1:
+                continue
+                
+            print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗，已重試 {max_retries} 次")
     
     return pd.DataFrame()
 
@@ -562,7 +634,7 @@ if __name__ == "__main__":
     # 先測試連接
     test_yahoo_finance_connection()
     # 獲取數據
-    result = get_eps_data_alternative(use_cache=False)
+    result = get_eps_data_alternative(use_cache=False, batch_size=3)
     print(f"獲取到 {len(result)} 檔股票的 EPS 和股息數據")
     
     # 顯示前 5 筆數據
