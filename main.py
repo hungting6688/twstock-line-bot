@@ -511,8 +511,23 @@ def run_push_task(task_name):
 if __name__ == "__main__":
     # 從命令行參數獲取任務名稱
     task_name = "manual"  # 默認為手動推播
-    if len(sys.argv) > 1:
-        task_name = sys.argv[1].lower()
+    
+    # 解析命令行參數
+    import argparse
+    parser = argparse.ArgumentParser(description='台股分析系統')
+    parser.add_argument('--mode', type=str, help='執行模式 (morning, afternoon, noon, evening)')
+    parser.add_argument('task', nargs='?', default=None, help='任務名稱 (向後兼容)')
+    
+    args = parser.parse_args()
+    
+    # 優先使用 --mode 參數
+    if args.mode:
+        task_name = args.mode
+    # 其次使用位置參數
+    elif args.task:
+        task_name = args.task
+    
+    print(f"[main] 開始處理任務: {task_name}")
     
     # 運行推播任務
     success = run_push_task(task_name)
