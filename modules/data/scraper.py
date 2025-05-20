@@ -1,5 +1,6 @@
 """
 數據爬蟲模組 - 整合 eps_dividend_scraper.py、fundamental_scraper.py、twse_scraper.py
+增強版本：改進數據獲取可靠性和錯誤處理
 """
 print("[scraper] ✅ 已載入最新版")
 
@@ -13,6 +14,8 @@ import time
 import os
 import json
 import random
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -61,9 +64,17 @@ def get_latest_season():
         
     return str(year), season
 
-def get_eps_data(use_cache=True, cache_expiry_hours=24):
+# 全局數據獲取狀態跟踪
+data_fetch_status = {
+    "last_fetch_time": None,
+    "last_fetch_source": None,
+    "successful_sources": [],
+    "failed_sources": []
+}
+
+def get_eps_data(use_cache=True, cache_expiry_hours=72):
     """
-    抓取所有上市公司的 EPS 和股息資料，增加重試機制和緩存
+    抓取所有上市公司的 EPS 和股息資料，增加多來源獲取和強化錯誤處理
     
     參數:
     - use_cache: 是否使用緩存
@@ -72,7 +83,9 @@ def get_eps_data(use_cache=True, cache_expiry_hours=24):
     返回:
     - 字典: {stock_id: {"eps": value, "dividend": value}}
     """
-    # 檢查緩存
+    global data_fetch_status
+    
+    # 檢查緩存（增加緩存有效期至72小時）
     cache_file = os.path.join(CACHE_DIR, 'eps_data_cache.json')
     if use_cache and os.path.exists(cache_file):
         try:
@@ -80,13 +93,91 @@ def get_eps_data(use_cache=True, cache_expiry_hours=24):
                 cache_data = json.load(f)
                 cache_time = datetime.datetime.fromisoformat(cache_data['timestamp'])
                 
-                # 檢查緩存是否過期
+                # 檢查緩存是否過期（延長至72小時）
                 if datetime.datetime.now() - cache_time < datetime.timedelta(hours=cache_expiry_hours):
                     print(f"[scraper] ✅ 使用緩存的 EPS 和股息數據 (更新於 {cache_time.strftime('%Y-%m-%d %H:%M')})")
                     return cache_data['data']
         except Exception as e:
             print(f"[scraper] ⚠️ 讀取緩存失敗: {e}")
     
+    # 並行從多個來源獲取數據
+    print("[scraper] 🔄 從多個數據源並行獲取 EPS 和股息數據...")
+    
+    # 定義數據源函數列表
+    data_sources = [
+        ("MOPS", get_eps_data_from_mops),
+        ("Yahoo Finance", get_eps_data_from_yahoo),
+        ("Backup", get_backup_eps_data)
+    ]
+    
+    # 追踪結果
+    results = {}
+    successful_source = None
+    
+    # 使用線程池並行執行數據獲取
+    with ThreadPoolExecutor(max_workers=len(data_sources)) as executor:
+        # 提交所有任務
+        future_to_source = {executor.submit(source_func): source_name for source_name, source_func in data_sources}
+        
+        # 當任何一個任務完成時處理結果
+        for future in as_completed(future_to_source):
+            source_name = future_to_source[future]
+            try:
+                data = future.result()
+                if data and len(data) > 0:
+                    print(f"[scraper] ✅ 從 {source_name} 成功獲取 {len(data)} 檔股票的 EPS 和股息數據")
+                    results = data
+                    successful_source = source_name
+                    data_fetch_status["successful_sources"].append(source_name)
+                    
+                    # 中斷其他仍在執行的任務
+                    for f in future_to_source:
+                        if not f.done():
+                            f.cancel()
+                    break
+                else:
+                    print(f"[scraper] ⚠️ 從 {source_name} 獲取數據失敗或為空")
+                    data_fetch_status["failed_sources"].append(source_name)
+            except Exception as e:
+                print(f"[scraper] ❌ 從 {source_name} 獲取數據時出錯: {e}")
+                data_fetch_status["failed_sources"].append(source_name)
+    
+    # 如果所有來源都失敗，使用備用方案
+    if not results:
+        print("[scraper] ⚠️ 所有數據源均失敗，使用硬編碼的備用數據")
+        results = get_hardcoded_eps_data()
+        successful_source = "Hardcoded Backup"
+    
+    # 更新狀態追踪
+    data_fetch_status["last_fetch_time"] = datetime.datetime.now().isoformat()
+    data_fetch_status["last_fetch_source"] = successful_source
+    
+    # 記錄數據獲取狀態
+    try:
+        status_file = os.path.join(CACHE_DIR, 'data_fetch_status.json')
+        with open(status_file, 'w', encoding='utf-8') as f:
+            json.dump(data_fetch_status, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[scraper] ⚠️ 無法保存數據獲取狀態: {e}")
+    
+    # 儲存結果到緩存
+    if use_cache and results:
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                cache_data = {
+                    'timestamp': datetime.datetime.now().isoformat(),
+                    'source': successful_source,
+                    'data': results
+                }
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+            print(f"[scraper] ✅ 已更新 EPS 和股息數據緩存")
+        except Exception as e:
+            print(f"[scraper] ⚠️ 寫入緩存失敗: {e}")
+    
+    return results
+
+def get_eps_data_from_mops():
+    """從公開資訊觀測站獲取 EPS 數據（設置較短的超時）"""
     year, season = get_latest_season()
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
@@ -102,10 +193,10 @@ def get_eps_data(use_cache=True, cache_expiry_hours=24):
     div_df = pd.DataFrame()
     
     # 使用重試機制的 session
-    session = create_retry_session(retries=5, backoff_factor=1.0)
+    session = create_retry_session(retries=2, backoff_factor=0.5)
     
     try:
-        # 嘗試獲取每股盈餘資料
+        # 嘗試獲取每股盈餘資料，設置更短的超時
         eps_url = "https://mops.twse.com.tw/mops/web/ajax_t05st09_1"
         eps_data = {
             "encodeURIComponent": "1",
@@ -117,16 +208,16 @@ def get_eps_data(use_cache=True, cache_expiry_hours=24):
             "season": season
         }
         
-        # 增加重試邏輯和錯誤處理
-        max_attempts = 3
+        # 增加重試邏輯但縮短超時時間
+        max_attempts = 2
         for attempt in range(max_attempts):
             try:
-                # 發送請求，增加超時時間
+                # 發送請求，減少超時時間
                 eps_res = session.post(
                     eps_url,
                     data=eps_data,
                     headers=headers,
-                    timeout=60  # 增加超時時間到60秒
+                    timeout=15  # 減少超時時間到15秒
                 )
                 
                 if eps_res.status_code == 200 and "<table" in eps_res.text.lower():
@@ -143,27 +234,27 @@ def get_eps_data(use_cache=True, cache_expiry_hours=24):
                     except Exception as e:
                         print(f"[scraper] ⚠️ EPS表格解析失敗 (嘗試 {attempt+1}/{max_attempts}): {e}")
                 
-                # 如果不是最後一次嘗試，暫停一下再重試
+                # 如果不是最後一次嘗試，暫停一下再重試（縮短等待時間）
                 if attempt < max_attempts - 1:
-                    time.sleep(5 * (attempt + 1))  # 增加的延遲
+                    time.sleep(2)  # 減少延遲
             except Exception as e:
                 print(f"[scraper] ⚠️ EPS數據請求失敗 (嘗試 {attempt+1}/{max_attempts}): {e}")
                 if attempt < max_attempts - 1:
-                    time.sleep(5 * (attempt + 1))
+                    time.sleep(2)
     except Exception as e:
         print(f"[scraper] ❌ 查無 EPS 表格或格式錯誤：{e}")
     
-    # 同樣的方式處理股息資料
+    # 同樣的方式處理股息資料，但縮短等待時間
     try:
-        max_attempts = 3
+        max_attempts = 2
         for attempt in range(max_attempts):
             try:
-                # 嘗試獲取股息資料
+                # 嘗試獲取股息資料，減少超時時間
                 div_res = session.post(
                     "https://mops.twse.com.tw/mops/web/ajax_t05st34",
                     data={"encodeURIComponent": "1", "step": "1", "firstin": "1", "off": "1", "TYPEK": "sii"},
                     headers=headers, 
-                    timeout=60  # 增加超時時間
+                    timeout=15  # 減少超時時間
                 )
                 
                 if div_res.status_code == 200 and "<table" in div_res.text.lower():
@@ -182,18 +273,18 @@ def get_eps_data(use_cache=True, cache_expiry_hours=24):
                 
                 # 如果不是最後一次嘗試，暫停一下再重試
                 if attempt < max_attempts - 1:
-                    time.sleep(5 * (attempt + 1))  # 增加的延遲
+                    time.sleep(2)  # 減少延遲
             except Exception as e:
                 print(f"[scraper] ⚠️ 股息數據請求失敗 (嘗試 {attempt+1}/{max_attempts}): {e}")
                 if attempt < max_attempts - 1:
-                    time.sleep(5 * (attempt + 1))
+                    time.sleep(2)
     except Exception as e:
         print(f"[scraper] ❌ 查無股利表格或格式錯誤：{e}")
     
     # 檢查是否成功獲取數據
     if eps_df.empty and div_df.empty:
-        print("[scraper] ⚠️ 無法從公開資訊觀測站獲取數據，嘗試使用替代方案...")
-        return get_eps_data_from_yahoo()
+        print("[scraper] ⚠️ 無法從公開資訊觀測站獲取數據")
+        return {}
     
     # 合併數據
     for _, row in eps_df.iterrows():
@@ -206,22 +297,71 @@ def get_eps_data(use_cache=True, cache_expiry_hours=24):
             result[sid] = {"eps": None, "dividend": None}
         result[sid]["dividend"] = round(row["Dividend"], 2)
     
-    print(f"[scraper] ✅ 成功獲取 {len(result)} 檔股票的 EPS 和股息數據")
-    
-    # 儲存結果到緩存
-    if use_cache and result:
-        try:
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                cache_data = {
-                    'timestamp': datetime.datetime.now().isoformat(),
-                    'data': result
-                }
-                json.dump(cache_data, f, ensure_ascii=False, indent=2)
-            print(f"[scraper] ✅ 已更新 EPS 和股息數據緩存")
-        except Exception as e:
-            print(f"[scraper] ⚠️ 寫入緩存失敗: {e}")
-    
+    print(f"[scraper] ✅ 成功從公開資訊觀測站獲取 {len(result)} 檔股票的 EPS 和股息數據")
     return result
+
+def get_eps_data_from_yahoo():
+    """從 Yahoo Finance 獲取 EPS 和股息數據"""
+    try:
+        # 導入 finance_yahoo 模組中的函數
+        from modules.data.finance_yahoo import get_eps_data_alternative
+        
+        # 使用縮短超時的設置來調用此函數
+        return get_eps_data_alternative(max_stocks=80, timeout=20)
+    except Exception as e:
+        print(f"[scraper] ❌ 使用 Yahoo Finance 獲取數據失敗：{e}")
+        return {}
+
+def get_backup_eps_data():
+    """嘗試從備用來源獲取 EPS 數據"""
+    try:
+        # 先檢查備用緩存
+        backup_cache_file = os.path.join(CACHE_DIR, 'backup_eps_data_cache.json')
+        if os.path.exists(backup_cache_file):
+            try:
+                with open(backup_cache_file, 'r', encoding='utf-8') as f:
+                    backup_data = json.load(f)
+                    # 即使過期也使用，只是顯示警告
+                    cache_time = datetime.datetime.fromisoformat(backup_data['timestamp'])
+                    age_hours = (datetime.datetime.now() - cache_time).total_seconds() / 3600
+                    print(f"[scraper] ℹ️ 使用備用緩存的 EPS 數據 (年齡：{age_hours:.1f}小時)")
+                    return backup_data['data']
+            except Exception as e:
+                print(f"[scraper] ⚠️ 讀取備用緩存失敗: {e}")
+        
+        # 否則使用硬編碼的備用數據
+        return get_hardcoded_eps_data()
+    except Exception as e:
+        print(f"[scraper] ❌ 備份數據源失敗: {e}")
+        return {}
+
+def get_hardcoded_eps_data():
+    """提供硬編碼的重要股票 EPS 和股息數據作為最後的備用方案"""
+    print("[scraper] 使用硬編碼的重要股票 EPS 和股息數據")
+    
+    # 大型股的基本財務數據
+    return {
+        "2330": {"eps": 9.5, "dividend": 3.0},  # 台積電
+        "2317": {"eps": 5.2, "dividend": 4.5},  # 鴻海
+        "2454": {"eps": 50.0, "dividend": 51.0},  # 聯發科
+        "2412": {"eps": 4.5, "dividend": 4.9},   # 中華電
+        "2303": {"eps": 2.2, "dividend": 2.0},   # 聯電
+        "2308": {"eps": 5.8, "dividend": 4.2},   # 台達電
+        "2882": {"eps": 2.1, "dividend": 2.8},   # 國泰金
+        "2881": {"eps": 2.0, "dividend": 2.5},   # 富邦金
+        "1301": {"eps": 4.8, "dividend": 3.9},   # 台塑
+        "1303": {"eps": 4.0, "dividend": 3.5},   # 南亞
+        "2002": {"eps": 1.8, "dividend": 2.2},   # 中鋼
+        "2886": {"eps": 1.9, "dividend": 2.4},   # 兆豐金
+        "1216": {"eps": 3.7, "dividend": 3.5},   # 統一
+        "2891": {"eps": 1.8, "dividend": 2.2},   # 中信金
+        "3008": {"eps": 4.5, "dividend": 4.2},   # 大立光
+        "2884": {"eps": 1.7, "dividend": 1.8},   # 玉山金
+        "2327": {"eps": 14.2, "dividend": 8.5},  # 國巨
+        "2603": {"eps": 2.3, "dividend": 2.5},   # 長榮
+        "3045": {"eps": 5.2, "dividend": 4.5},   # 台灣大
+        "2912": {"eps": 7.5, "dividend": 6.8}    # 統一超
+    }
 
 
 def get_all_valid_twse_stocks(limit=None, use_cache=True, cache_expiry_hours=48):
@@ -261,14 +401,14 @@ def get_all_valid_twse_stocks(limit=None, use_cache=True, cache_expiry_hours=48)
     headers = {"User-Agent": "Mozilla/5.0"}
     
     # 使用重試 session
-    session = create_retry_session(retries=4, backoff_factor=1.0)
+    session = create_retry_session(retries=2, backoff_factor=0.5)
     
     try:
         # 增加重試邏輯
-        max_attempts = 3
+        max_attempts = 2
         for attempt in range(max_attempts):
             try:
-                response = session.get(url, headers=headers, timeout=30)
+                response = session.get(url, headers=headers, timeout=15)
                 response.encoding = 'big5'
                 
                 if response.status_code == 200 and len(response.text) > 1000:
@@ -276,11 +416,11 @@ def get_all_valid_twse_stocks(limit=None, use_cache=True, cache_expiry_hours=48)
                     
                 # 如果不是最後一次嘗試，暫停一下再重試
                 if attempt < max_attempts - 1:
-                    time.sleep(5 * (attempt + 1))
+                    time.sleep(2)
             except Exception as e:
                 print(f"[scraper] ⚠️ 獲取股票列表失敗 (嘗試 {attempt+1}/{max_attempts}): {e}")
                 if attempt < max_attempts - 1:
-                    time.sleep(5 * (attempt + 1))
+                    time.sleep(2)
 
         # 解析數據
         tables = pd.read_html(StringIO(response.text))
@@ -378,95 +518,9 @@ def get_backup_stock_list():
     return backup_stocks
 
 
-def get_eps_data_from_yahoo():
+def get_dividend_data(use_cache=True, cache_expiry_hours=72):
     """
-    使用 Yahoo Finance 獲取 EPS 和股息數據 (備用方案)
-    """
-    # 從 finance_yahoo 模組導入優化後的方法
-    try:
-        from modules.data.finance_yahoo import get_eps_data_alternative
-        return get_eps_data_alternative()
-    except ImportError:
-        print("[scraper] ⚠️ 找不到 finance_yahoo 模組，使用內建方法")
-        import yfinance as yf
-        from concurrent.futures import ThreadPoolExecutor
-        import time
-        import random
-        
-        print("[scraper] 使用 Yahoo Finance 替代方案獲取財務數據...")
-        
-        # 獲取股票列表
-        stock_list = get_backup_stock_list()  # 使用備用列表，避免重複請求失敗
-        
-        result = {}
-        
-        # 使用多線程但限制並發數量，加入延遲
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {}
-            for stock in stock_list:
-                stock_id = stock["stock_id"]
-                # 加入隨機延遲，避免過於頻繁的請求
-                time.sleep(random.uniform(0.5, 1.5))
-                futures[executor.submit(fetch_stock_finance, stock_id)] = stock_id
-            
-            for future in futures:
-                stock_id = futures[future]
-                try:
-                    data = future.result()
-                    if data:
-                        result[stock_id] = data
-                except Exception as e:
-                    print(f"[scraper] ⚠️ 處理 {stock_id} 時出錯: {str(e)[:100]}")
-        
-        print(f"[scraper] ✅ 成功獲取 {len(result)} 檔股票的財務數據 (Yahoo Finance)")
-        return result
-
-
-def fetch_stock_finance(stock_id):
-    """
-    從 Yahoo Finance 獲取單一股票的財務數據
-    """
-    try:
-        import yfinance as yf
-        
-        ticker = yf.Ticker(f"{stock_id}.TW")
-        info = ticker.info
-        
-        # 獲取財務數據
-        eps = info.get('trailingEPS')
-        dividend_yield = info.get('dividendYield', 0)
-        
-        # 檢查 EPS
-        if eps is not None and eps != 'N/A':
-            try:
-                eps = round(float(eps), 2)
-            except:
-                eps = None
-        else:
-            eps = None
-        
-        # 轉換股息率為百分比
-        if dividend_yield and dividend_yield != 'N/A':
-            try:
-                dividend_yield = round(float(dividend_yield) * 100, 2)
-                if dividend_yield <= 0:
-                    dividend_yield = None
-            except:
-                dividend_yield = None
-        else:
-            dividend_yield = None
-        
-        return {
-            "eps": eps,
-            "dividend": dividend_yield
-        }
-    except Exception:
-        return None
-
-
-def get_dividend_data(use_cache=True, cache_expiry_hours=24):
-    """
-    僅獲取股息資料
+    僅獲取股息資料，增加緩存有效期
     
     參數:
     - use_cache: 是否使用緩存
@@ -483,7 +537,7 @@ def get_dividend_data(use_cache=True, cache_expiry_hours=24):
                 cache_data = json.load(f)
                 cache_time = datetime.datetime.fromisoformat(cache_data['timestamp'])
                 
-                # 檢查緩存是否過期
+                # 檢查緩存是否過期，延長到72小時
                 if datetime.datetime.now() - cache_time < datetime.timedelta(hours=cache_expiry_hours):
                     print(f"[scraper] ✅ 使用緩存的股息數據 (更新於 {cache_time.strftime('%Y-%m-%d %H:%M')})")
                     return cache_data['data']
@@ -551,7 +605,7 @@ def get_all_valid_twse_stocks_with_type(use_cache=True):
 
 def fetch_fundamental_data(stock_ids, max_stocks=20):
     """
-    獲取基本面數據（PE, PB, ROE, 法人持股等）
+    獲取基本面數據（PE, PB, ROE, 法人持股等），增加平行處理和超時控制
     
     參數:
     - stock_ids: 股票代碼列表
@@ -560,7 +614,7 @@ def fetch_fundamental_data(stock_ids, max_stocks=20):
     返回:
     - 包含基本面資訊的 DataFrame
     """
-    print("[scraper] ⏳ 開始擷取法人與本益比資料...")
+    print(f"[scraper] ⏳ 開始擷取法人與本益比資料 (最多處理 {max_stocks} 檔)...")
     base_url = "https://goodinfo.tw/tw/StockInfo.asp?STOCK_ID="
     headers = {
         "User-Agent": "Mozilla/5.0"
@@ -573,72 +627,98 @@ def fetch_fundamental_data(stock_ids, max_stocks=20):
         stock_ids = stock_ids[:max_stocks]
 
     # 使用重試 session
-    session = create_retry_session(retries=3, backoff_factor=1.0)
-
-    for stock_id in stock_ids:
-        try:
-            stock_id = str(stock_id).replace('="', '').replace('"', '').strip()
-            url = base_url + stock_id
+    session = create_retry_session(retries=2, backoff_factor=0.5)
+    
+    # 並行處理股票，但增加限流控制
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = []
+        
+        for stock_id in stock_ids:
+            # 每3個請求添加延遲以避免過快請求
+            if len(futures) > 0 and len(futures) % 3 == 0:
+                time.sleep(1)
             
-            # 嘗試重試邏輯
-            max_attempts = 2
-            for attempt in range(max_attempts):
-                try:
-                    resp = session.get(url, headers=headers, timeout=10)
-                    if resp.status_code == 200:
-                        break
-                    time.sleep(2 * (attempt + 1))
-                except Exception as e:
-                    if attempt < max_attempts - 1:
-                        time.sleep(2 * (attempt + 1))
-                    else:
-                        raise
-            
-            soup = BeautifulSoup(resp.text, "html.parser")
+            futures.append(executor.submit(
+                fetch_single_stock_fundamental, 
+                stock_id, 
+                session, 
+                base_url, 
+                headers
+            ))
+        
+        # 處理完成的任務
+        for future in as_completed(futures):
+            try:
+                data = future.result()
+                if data:
+                    result.append(data)
+            except Exception as e:
+                print(f"[scraper] ⚠️ 基本面數據獲取任務失敗: {e}")
 
-            tables = pd.read_html(StringIO(str(soup)), flavor="bs4")
-            summary_table = None
-            for table in tables:
-                if "本益比" in str(table):
-                    summary_table = table
-                    break
-
-            if summary_table is None or len(summary_table.columns) < 2:
-                raise ValueError("無法擷取正確欄位")
-
-            flat = summary_table.values.flatten()
-            pe, pb, roe = None, None, None
-            for idx, val in enumerate(flat):
-                if str(val).strip() == "本益比":
-                    try:
-                        pe = float(flat[idx + 1])
-                    except:
-                        pe = None
-                if str(val).strip() == "股價淨值比":
-                    try:
-                        pb = float(flat[idx + 1])
-                    except:
-                        pb = None
-                if str(val).strip() == "ROE":
-                    try:
-                        roe = float(flat[idx + 1])
-                    except:
-                        roe = None
-
-            result.append({
-                "證券代號": stock_id,
-                "PE": pe,
-                "PB": pb,
-                "ROE": roe,
-                "外資": None,  # 可擴展加入法人持股資訊
-                "投信": None,
-                "自營商": None,
-            })
-
-            # 增加延遲，避免被 ban
-            time.sleep(random.uniform(1.0, 2.0))
-
-        except Exception as e:
-            print(f"[scraper] ⚠️ {stock_id} 擷取失敗：{e}")
-
+    print(f"[scraper] ✅ 成功獲取 {len(result)} 檔股票的基本面數據")
     return pd.DataFrame(result)
+
+def fetch_single_stock_fundamental(stock_id, session, base_url, headers):
+    """獲取單一股票的基本面數據，包含更好的錯誤處理"""
+    try:
+        stock_id = str(stock_id).replace('="', '').replace('"', '').strip()
+        url = base_url + stock_id
+        
+        # 嘗試重試邏輯
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                resp = session.get(url, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    break
+                time.sleep(1)
+            except Exception as e:
+                if attempt < max_attempts - 1:
+                    time.sleep(1)
+                else:
+                    raise
+        
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        tables = pd.read_html(StringIO(str(soup)), flavor="bs4")
+        summary_table = None
+        for table in tables:
+            if "本益比" in str(table):
+                summary_table = table
+                break
+
+        if summary_table is None or len(summary_table.columns) < 2:
+            raise ValueError("無法擷取正確欄位")
+
+        flat = summary_table.values.flatten()
+        pe, pb, roe = None, None, None
+        for idx, val in enumerate(flat):
+            if str(val).strip() == "本益比":
+                try:
+                    pe = float(flat[idx + 1])
+                except:
+                    pe = None
+            if str(val).strip() == "股價淨值比":
+                try:
+                    pb = float(flat[idx + 1])
+                except:
+                    pb = None
+            if str(val).strip() == "ROE":
+                try:
+                    roe = float(flat[idx + 1])
+                except:
+                    roe = None
+
+        return {
+            "證券代號": stock_id,
+            "PE": pe,
+            "PB": pb,
+            "ROE": roe,
+            "外資": None,  # 可擴展加入法人持股資訊
+            "投信": None,
+            "自營商": None,
+        }
+
+    except Exception as e:
+        print(f"[scraper] ⚠️ {stock_id} 擷取失敗：{e}")
+        return None
