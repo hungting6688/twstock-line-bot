@@ -11,7 +11,10 @@ from datetime import datetime, timedelta
 from modules.data.fetcher import get_top_stocks
 from modules.data.scraper import get_eps_data
 from modules.analysis.technical import analyze_technical_indicators
-from modules.config import CACHE_DIR
+
+# 直接定義 CACHE_DIR 而不是導入
+CACHE_DIR = os.path.join(os.path.dirname(__file__), '../../cache')
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 class StockRecommender:
     """
