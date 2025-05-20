@@ -8,20 +8,44 @@ on:
 jobs:
   run-evening:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # 增加執行超時設定
+    timeout-minutes: 20  # 增加執行超時設定
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Set timezone
+        run: |
+          echo "Setting timezone to Asia/Taipei"
+          echo "TZ=Asia/Taipei" >> $GITHUB_ENV
+          
       - name: Test network connection
         run: |
           echo "測試網絡連接..."
-          ping -c 4 finance.yahoo.com || echo "ping 失敗但繼續執行"
           curl -I https://finance.yahoo.com || echo "curl 失敗但繼續執行"
+          curl -I https://mops.twse.com.tw || echo "curl 失敗但繼續執行"
+          curl -I https://www.twse.com.tw || echo "curl 失敗但繼續執行"
+      
+      - name: Configure retry and timeout settings
+        run: |
+          # 設置更多環境變量來控制重試和超時
+          echo "YAHOO_FINANCE_RETRY_ATTEMPTS=5" >> $GITHUB_ENV
+          echo "YAHOO_FINANCE_BATCH_DELAY=5" >> $GITHUB_ENV
+          echo "YAHOO_FINANCE_CONNECTION_TIMEOUT=10" >> $GITHUB_ENV
+          echo "YAHOO_FINANCE_READ_TIMEOUT=15" >> $GITHUB_ENV
+          
+          echo "SCRAPER_MAX_RETRIES=3" >> $GITHUB_ENV
+          echo "SCRAPER_CONNECTION_TIMEOUT=10" >> $GITHUB_ENV
+          echo "SCRAPER_READ_TIMEOUT=15" >> $GITHUB_ENV
+          echo "SCRAPER_BATCH_DELAY=2" >> $GITHUB_ENV
+      
       - name: Run Evening Recommendations
         env:
           GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
@@ -31,7 +55,23 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
-          YAHOO_FINANCE_RETRY_ATTEMPTS: "5"
-          YAHOO_FINANCE_BATCH_DELAY: "5"
           TZ: "Asia/Taipei"
-        run: python main.py --mode=evening
+        run: |
+          # 使用多次重試機制執行主程序
+          MAX_ATTEMPTS=2
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo "執行嘗試 $i/$MAX_ATTEMPTS..."
+            if python main.py --mode=evening; then
+              echo "成功完成盤後分析！"
+              exit 0
+            else
+              echo "嘗試 $i 失敗，退出碼: $?"
+              if [ $i -lt $MAX_ATTEMPTS ]; then
+                echo "等待 30 秒後重試..."
+                sleep 30
+              else
+                echo "已達最大重試次數，放棄執行"
+                exit 1
+              fi
+            fi
+          done
