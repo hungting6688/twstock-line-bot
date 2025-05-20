@@ -1,0 +1,80 @@
+name: 每週系統維護
+
+on:
+  schedule:
+    - cron: '0 18 * * 0'  # 每週日台灣時間凌晨2點(UTC 18:00)執行
+  workflow_dispatch:  # 也可以手動觸發
+
+jobs:
+  system-maintenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Set timezone
+        run: |
+          echo "Setting timezone to Asia/Taipei"
+          echo "TZ=Asia/Taipei" >> $GITHUB_ENV
+          
+      - name: Check cache status
+        run: |
+          python cache_manage.py --list
+          
+      - name: Backup cache
+        run: |
+          python cache_manage.py --backup
+          
+      - name: Remove old cache files
+        run: |
+          python cache_manage.py --clean-old 7  # 清理超過7天的緩存
+          
+      - name: Check system health
+        run: |
+          python main.py --check
+          
+      - name: Send maintenance report
+        env:
+          GOOGLE_JSON_KEY: ${{ secrets.GOOGLE_JSON_KEY }}
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+          TZ: "Asia/Taipei"
+        run: |
+          # 創建簡單的報告並發送
+          echo "生成系統維護報告..."
+          
+          REPORT_FILE="maintenance_report.txt"
+          echo "台股分析系統 - 週期維護報告" > $REPORT_FILE
+          echo "日期: $(date '+%Y-%m-%d %H:%M:%S')" >> $REPORT_FILE
+          echo "----------------------------------------" >> $REPORT_FILE
+          
+          echo "緩存狀態:" >> $REPORT_FILE
+          python cache_manage.py --list >> $REPORT_FILE 2>&1
+          
+          echo "系統檢查:" >> $REPORT_FILE
+          python main.py --check >> $REPORT_FILE 2>&1
+          
+          # 使用 Python 發送報告通知
+          python -c "
+          import os, datetime
+          from modules.notification.dual_notifier import send_notification
+          
+          with open('maintenance_report.txt', 'r') as f:
+              report = f.read()
+          
+          subject = f\"系統維護報告 - {datetime.datetime.now().strftime('%Y-%m-%d')}\"
+          send_notification(report, subject)
+          print('維護報告已發送')
+          "
