@@ -36,27 +36,41 @@ def analyze_technical_indicators(stock_ids):
         desc = []
 
         # MACD
-        if row["MACD"] == 1:
+        # 修正：確保處理的是標量值而非序列
+        if isinstance(row["MACD"], (int, float)) and row["MACD"] == 1:
             score += 1 * weights.get("MACD", 1.0)
             desc.append("MACD黃金交叉")
 
         # KD
-        if row["K"] < 80 and row["K"] > row["D"]:
+        # 修正：安全處理 K 和 D 值可能是 Series 的情況
+        k_value = row["K"] if isinstance(row["K"], (int, float)) else (row["K"].iloc[-1] if isinstance(row["K"], pd.Series) and not row["K"].empty else 0)
+        d_value = row["D"] if isinstance(row["D"], (int, float)) else (row["D"].iloc[-1] if isinstance(row["D"], pd.Series) and not row["D"].empty else 0)
+        
+        if k_value < 80 and k_value > d_value:
             score += 1 * weights.get("KD", 1.0)
             desc.append("KD黃金交叉")
 
         # RSI
-        if row["RSI"] > 50:
+        # 修正：安全處理 RSI 值可能是 Series 的情況
+        rsi_value = row["RSI"] if isinstance(row["RSI"], (int, float)) else (row["RSI"].iloc[-1] if isinstance(row["RSI"], pd.Series) and not row["RSI"].empty else 0)
+        
+        if rsi_value > 50:
             score += 1 * weights.get("RSI", 1.0)
             desc.append("RSI走強")
 
         # 均線
-        if row["均線"] == 1:
+        # 修正：確保處理的是標量值而非序列
+        ma_value = row["均線"] if isinstance(row["均線"], (int, float)) else (row["均線"].iloc[-1] if isinstance(row["均線"], pd.Series) and not row["均線"].empty else 0)
+        
+        if ma_value == 1:
             score += 1 * weights.get("MA", 1.0)
             desc.append("站上均線")
 
         # 布林通道
-        if row["布林通道"] == 1:
+        # 修正：確保處理的是標量值而非序列
+        bb_value = row["布林通道"] if isinstance(row["布林通道"], (int, float)) else (row["布林通道"].iloc[-1] if isinstance(row["布林通道"], pd.Series) and not row["布林通道"].empty else 0)
+        
+        if bb_value == 1:
             score += 1 * weights.get("BB", 1.0)
             desc.append("布林通道偏多")
 
@@ -67,7 +81,7 @@ def analyze_technical_indicators(stock_ids):
         if score >= 7:
             label = "✅ 推薦"
             suggestion = "建議立即列入關注清單"
-        elif row["RSI"] < 30 and row["均線"] == 0:
+        elif rsi_value < 30 and ma_value == 0:
             label = "⚠️ 走弱"
             suggestion = "不建議操作，短線偏空"
 
@@ -77,7 +91,8 @@ def analyze_technical_indicators(stock_ids):
             "desc": "、".join(desc) if desc else "無明顯技術特徵",
             "label": label,
             "suggestion": suggestion,
-            "is_weak": (label == "⚠️ 走弱")
+            "is_weak": (label == "⚠️ 走弱"),
+            "RSI": rsi_value  # 保存 RSI 值以便外部使用
         }
 
     return results
@@ -116,13 +131,24 @@ def generate_ta_signals(stock_ids):
             df["Signal"] = df["MACD"].ewm(span=9).mean()
             
             macd_signal = 0
+            # 修正：安全獲取最後一個值
             if not df["MACD"].isna().all() and not df["Signal"].isna().all():
-                macd_signal = int(safe_float(df["MACD"]) > safe_float(df["Signal"]))
+                last_macd = safe_float(df["MACD"])
+                last_signal = safe_float(df["Signal"])
+                macd_signal = int(last_macd > last_signal)
 
             # 計算 KD
             low_min = df["Low"].rolling(window=9).min()
             high_max = df["High"].rolling(window=9).max()
-            rsv = (df["Close"] - low_min) / (high_max - low_min) * 100
+            
+            # 修正：防止除以零的可能性
+            denom = high_max - low_min
+            rsv = pd.Series(np.zeros(len(df)))
+            valid_denom = ~(denom == 0)
+            
+            if valid_denom.any():
+                rsv[valid_denom] = (df["Close"][valid_denom] - low_min[valid_denom]) / denom[valid_denom] * 100
+            
             df["K"] = rsv.ewm(com=2).mean()
             df["D"] = df["K"].ewm(com=2).mean()
             
@@ -131,11 +157,23 @@ def generate_ta_signals(stock_ids):
 
             # 計算 RSI
             delta = df["Close"].diff()
-            gain = delta.where(delta > 0, 0)
-            loss = -delta.where(delta < 0, 0)
+            gain = delta.copy()
+            loss = delta.copy()
+            gain[gain < 0] = 0
+            loss[loss > 0] = 0
+            loss = abs(loss)
+            
+            # 使用更安全的方法計算平均值
             avg_gain = gain.rolling(window=14).mean()
             avg_loss = loss.rolling(window=14).mean()
-            rs = avg_gain / avg_loss
+            
+            # 修正：防止除以零
+            rs = pd.Series(np.zeros(len(df)))
+            valid_loss = avg_loss > 0
+            
+            if valid_loss.any():
+                rs[valid_loss] = avg_gain[valid_loss] / avg_loss[valid_loss]
+            
             rsi = 100 - (100 / (1 + rs))
             
             rsi_val = safe_float(rsi)
@@ -144,16 +182,24 @@ def generate_ta_signals(stock_ids):
             ma5 = df["Close"].rolling(window=5).mean()
             ma20 = df["Close"].rolling(window=20).mean()
             
+            # 修正：安全獲取最後一個值
+            ma5_last = safe_float(ma5)
+            ma20_last = safe_float(ma20)
+            
             # 短期均線是否突破長期均線
-            ma_score = int(safe_float(ma5) > safe_float(ma20))
+            ma_score = int(ma5_last > ma20_last)
 
             # 計算布林通道
             mavg = df["Close"].rolling(window=20).mean()
             std = df["Close"].rolling(window=20).std()
             upper = mavg + 2 * std
             
-            # 股價是否突破布林通道上軌
-            bb_signal = int(df["Close"].iloc[-1] > upper.iloc[-1]) if not upper.isna().all() else 0
+            # 修正：安全獲取最後一個值
+            bb_signal = 0
+            if not upper.isna().all():
+                last_close = df["Close"].iloc[-1]
+                last_upper = upper.iloc[-1]
+                bb_signal = int(last_close > last_upper)
 
             # 記錄指標結果
             results.append({
@@ -183,7 +229,17 @@ def safe_float(series):
     - 浮點數值或 0.0
     """
     try:
-        return float(series.iloc[-1])
+        # 修正：確保處理 Series 的情況
+        if isinstance(series, pd.Series):
+            if series.empty:
+                return 0.0
+            
+            # 獲取最後一個非 NaN 值
+            last_valid = series.dropna().iloc[-1] if not series.isna().all() else 0.0
+            return float(last_valid)
+        else:
+            # 如果不是 Series，直接嘗試轉換
+            return float(series)
     except:
         return 0.0
 
@@ -243,15 +299,22 @@ def calculate_rsi(stock_code, period=14):
         delta = df['Close'].diff()
         
         # 分離漲跌
-        gain = delta.mask(delta < 0, 0)
-        loss = -delta.mask(delta > 0, 0)
+        gain = delta.copy()
+        loss = delta.copy()
+        gain[gain < 0] = 0
+        loss[loss > 0] = 0
+        loss = abs(loss)
         
         # 計算平均漲跌
         avg_gain = gain.rolling(window=period).mean()
         avg_loss = loss.rolling(window=period).mean()
         
         # 計算相對強度
-        rs = avg_gain / avg_loss
+        rs = pd.Series(np.zeros(len(df)))
+        valid_loss = avg_loss > 0
+        
+        if valid_loss.any():
+            rs[valid_loss] = avg_gain[valid_loss] / avg_loss[valid_loss]
         
         # 計算 RSI
         df['RSI'] = 100 - (100 / (1 + rs))
@@ -325,11 +388,15 @@ def is_golden_cross(stock_code, short_period=5, long_period=20):
         short_ma = ma_df[f'MA{short_period}']
         long_ma = ma_df[f'MA{long_period}']
         
-        # 檢查今天是否為黃金交叉（今天短期均線在長期均線上方，昨天在下方）
-        today_cross = short_ma.iloc[-1] > long_ma.iloc[-1]
-        yesterday_cross = short_ma.iloc[-2] <= long_ma.iloc[-2]
+        # 修正：安全獲取索引值
+        if len(short_ma) >= 2 and len(long_ma) >= 2:
+            # 檢查今天是否為黃金交叉（今天短期均線在長期均線上方，昨天在下方）
+            today_cross = short_ma.iloc[-1] > long_ma.iloc[-1]
+            yesterday_cross = short_ma.iloc[-2] <= long_ma.iloc[-2]
+            
+            return today_cross and yesterday_cross
         
-        return today_cross and yesterday_cross
+        return False
         
     except Exception as e:
         print(f"[technical] ⚠️ {stock_code} 黃金交叉檢查失敗：{e}")
