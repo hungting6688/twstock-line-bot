@@ -1,6 +1,6 @@
 """
 數據爬蟲模組 - 整合 eps_dividend_scraper.py、fundamental_scraper.py、twse_scraper.py
-增強版本：改進數據獲取可靠性和錯誤處理 (2025版)
+增強版本：改進數據獲取可靠性和錯誤處理 (2025版 - 修復超時設置)
 """
 print("[scraper] ✅ 已載入最新版")
 
@@ -50,11 +50,12 @@ def create_retry_session(retries=MAX_RETRIES, backoff_factor=0.5,
     session.mount('http://', adapter)
     session.mount('https://', adapter)
     
-    # 設定更長的默認超時
-    session.request = lambda method, url, **kwargs: super(requests.Session, session).request(
+    # 設定更長的默認超時 - 修復版本，避免使用 super
+    original_request = session.request
+    session.request = lambda method, url, **kwargs: original_request(
         method=method, 
         url=url, 
-        timeout=(CONNECTION_TIMEOUT, READ_TIMEOUT),  # (連接超時, 讀取超時)
+        timeout=kwargs.pop('timeout', (CONNECTION_TIMEOUT, READ_TIMEOUT)),  # 使用提供的超時或默認值
         **kwargs
     )
     
