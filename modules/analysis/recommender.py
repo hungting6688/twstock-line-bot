@@ -7,8 +7,9 @@ import traceback
 import yfinance as yf
 from datetime import datetime, timedelta
 
-# 假設這些函數已在其他模組中定義
-from modules.data.stock_data import get_top_stocks, get_eps_data
+# 修正導入路徑
+from modules.data.fetcher import get_top_stocks
+from modules.data.scraper import get_eps_data
 from modules.analysis.technical import analyze_technical_indicators
 from modules.config import CACHE_DIR
 
