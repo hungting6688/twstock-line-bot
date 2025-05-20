@@ -24,8 +24,7 @@ from modules.notification.dual_notifier import (
     send_weak_stock_alerts,
     send_combined_recommendations
 )
-from modules.config import TIMEOUT_SECONDS
-
+TIMEOUT_SECONDS = 300
 
 def run_with_timeout(func, args=(), kwargs=None, timeout_seconds=300, default_result=None):
     """
