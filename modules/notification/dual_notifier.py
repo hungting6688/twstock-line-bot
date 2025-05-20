@@ -8,7 +8,20 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
-from modules.config import NOTIFICATION_CONFIG
+# 直接定義 NOTIFICATION_CONFIG 配置
+NOTIFICATION_CONFIG = {
+    'email': {
+        'smtp_server': os.getenv('EMAIL_SMTP_SERVER', 'smtp.gmail.com'),
+        'smtp_port': int(os.getenv('EMAIL_SMTP_PORT', '587')),
+        'user': os.getenv('EMAIL_SENDER'),
+        'password': os.getenv('EMAIL_PASSWORD'),
+        'to': os.getenv('EMAIL_RECEIVER')
+    },
+    'line': {
+        'token': os.getenv('LINE_CHANNEL_ACCESS_TOKEN'),
+        'user_id': os.getenv('LINE_USER_ID')
+    }
+}
 
 def send_notification(message, subject, html_body=None):
     """
