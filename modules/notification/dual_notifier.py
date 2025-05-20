@@ -1,5 +1,5 @@
 """
-整合通知模組 - 同時支持 LINE 和電子郵件通知
+改進的雙重通知模組 - 優化雙重通知系統的可靠性和格式
 """
 print("[dual_notifier] ✅ 已載入雙重通知模組")
 
@@ -47,12 +47,32 @@ def send_notification(message, subject=None, html_body=None):
     
     # 無論 LINE 是否成功，都發送電子郵件通知 (雙重通知)
     try:
-        # 如果未指定主題，使用消息內容的前20個字符
+        # 如果未指定主題，使用消息內容的第一行或標題
         if not subject:
             if "\n" in message:
                 subject = message.split("\n")[0][:50]  # 使用第一行作為主題
             else:
-                subject = message[:50] + "..."  # 使用前50個字符
+                subject = message[:50] + "..." if len(message) > 50 else message  # 使用前50個字符
+        
+        # 如果沒有 HTML 內容，創建一個簡單的 HTML 版本
+        if not html_body:
+            html_body = f"""
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
+                    .content {{ white-space: pre-wrap; }}
+                    .footer {{ color: #666; font-size: 12px; margin-top: 30px; }}
+                </style>
+            </head>
+            <body>
+                <div class="content">{message.replace('\n', '<br>')}</div>
+                <div class="footer">
+                    此電子郵件由台股分析系統自動產生於 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                </div>
+            </body>
+            </html>
+            """
         
         send_email(subject, message, html_body)
         results["email"] = True
@@ -120,6 +140,7 @@ def send_stock_recommendations(stocks, time_slot):
             <div><span class="label">推薦理由:</span> {stock['reason']}</div>
             <div><span class="label">目標價:</span> <span class="price">{stock['target_price']}</span></div>
             <div><span class="label">止損價:</span> <span class="stop-loss">{stock['stop_loss']}</span></div>
+            <div><span class="label">當前價格:</span> {stock.get('current_price', '無資料')}</div>
         </div>
         """
     
@@ -152,6 +173,9 @@ def send_weak_valley_alerts(weak_valleys):
         message += f"當前價格: {stock['current_price']}\n"
         message += f"警報原因: {stock['alert_reason']}\n\n"
     
+    # 補充說明在通知結尾
+    message += "註：極弱谷表示股票處於超賣狀態，可以觀察反彈機會，但要注意風險控制。"
+    
     # 生成 HTML 格式的電子郵件正文
     html_body = f"""
     <html>
@@ -165,10 +189,11 @@ def send_weak_valley_alerts(weak_valleys):
             .price {{ font-weight: bold; }}
             .reason {{ color: #cc0000; }}
             .footer {{ color: #666; font-size: 12px; margin-top: 30px; }}
+            .note {{ margin-top: 20px; padding: 10px; background-color: #f8f9fa; border-left: 4px solid #6c757d; }}
         </style>
     </head>
     <body>
-        <div class="header">【極弱谷警報】</div>
+        <div class="header">【極弱谷警報】- 超賣股票</div>
     """
     
     for stock in weak_valleys:
@@ -181,6 +206,10 @@ def send_weak_valley_alerts(weak_valleys):
         """
     
     html_body += f"""
+        <div class="note">
+            <strong>說明：</strong>極弱谷表示股票處於超賣狀態，技術指標顯示可能出現反彈機會。可以設置關注，但請謹慎評估風險，並設置止損點位。
+        </div>
+        
         <div class="footer">
             此電子郵件由台股分析系統自動產生於 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         </div>
@@ -188,7 +217,7 @@ def send_weak_valley_alerts(weak_valleys):
     </html>
     """
     
-    subject = f"【極弱谷警報】- {len(weak_valleys)} 檔股票"
+    subject = f"【極弱谷警報】- {len(weak_valleys)} 檔可能超賣股票"
     send_notification(message, subject, html_body)
 
 def send_market_summary(market_score, top_performers, weak_performers):
@@ -302,5 +331,3 @@ def send_market_summary(market_score, top_performers, weak_performers):
     
     subject = f"【每日市場總結】- {datetime.now().strftime('%Y/%m/%d')} - 情緒指數 {market_score}/10"
     send_notification(message, subject, html_body)
-
-# 測試雙重通知
