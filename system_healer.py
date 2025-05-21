@@ -916,4 +916,346 @@ class SystemHealer:
                         "target": "failed",
                         "success": False,
                         "message": "無法導入通知模塊",
-                        "timestamp": datetime.now().isofo
+                        "timestamp": datetime.now().isoformat()
+                    })
+                except Exception as e:
+                    actions_taken.append({
+                        "action": "retry_notifications",
+                        "target": "failed",
+                        "success": False,
+                        "message": f"重試失敗通知時出錯: {e}",
+                        "timestamp": datetime.now().isoformat()
+                    })
+            else:
+                # 如果通知系統正常，執行例行清理
+                try:
+                    from dual_notifier import cleanup_old_failed_notifications
+                    
+                    cleaned_count = cleanup_old_failed_notifications()
+                    
+                    actions_taken.append({
+                        "action": "cleanup_notifications",
+                        "target": "old_failed",
+                        "success": True,
+                        "message": f"例行清理了 {cleaned_count} 個過舊的失敗通知記錄",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                except ImportError:
+                    pass  # 忽略導入錯誤
+                except Exception as e:
+                    logging.error(f"例行清理失敗通知時出錯: {e}")
+            
+            # 確定是否成功修復
+            success_count = sum(1 for action in actions_taken if action.get('success', False))
+            success = success_count > 0
+            
+            return {
+                'success': success,
+                'message': "已執行通知系統維護操作" if actions_taken else "無需修復",
+                'actions': actions_taken
+            }
+            
+        except Exception as e:
+            logging.error(f"修復通知系統時出錯: {e}")
+            return {
+                'success': False,
+                'message': f'修復通知系統時出錯: {e}',
+                'actions': [],
+                'exception': str(e)
+            }
+    
+    def _check_circuit_breakers(self):
+        """檢查熔斷器狀態"""
+        try:
+            # 導入熔斷器模塊
+            from circuit_breaker import CircuitBreaker
+            
+            # 獲取所有熔斷器狀態
+            circuit_states = CircuitBreaker.get_all_states()
+            
+            # 檢查是否有打開的熔斷器
+            open_circuits = [
+                name for name, state in circuit_states.items()
+                if state.get('state') in ['OPEN', 'HALF-OPEN']
+            ]
+            
+            if not open_circuits:
+                status = 'ok'
+                message = '所有熔斷器處於正常關閉狀態'
+                severity = 'low'
+            else:
+                status = 'warning'
+                message = f'{len(open_circuits)} 個熔斷器處於打開或半開狀態'
+                severity = 'medium'
+            
+            return {
+                'status': status,
+                'message': message,
+                'severity': severity,
+                'details': circuit_states,
+                'open_circuits': open_circuits
+            }
+            
+        except ImportError:
+            return {
+                'status': 'warning',
+                'message': '無法導入熔斷器模塊',
+                'severity': 'low'
+            }
+        except Exception as e:
+            logging.error(f"檢查熔斷器時出錯: {e}")
+            return {
+                'status': 'error',
+                'message': f'檢查熔斷器時出錯: {e}',
+                'severity': 'medium',
+                'exception': str(e)
+            }
+    
+    def _heal_circuit_breakers(self, check_result):
+        """修復熔斷器問題"""
+        try:
+            actions_taken = []
+            
+            status = check_result.get('status', 'unknown')
+            details = check_result.get('details', {})
+            open_circuits = check_result.get('open_circuits', [])
+            
+            if status in ['error', 'warning'] and open_circuits:
+                # 檢查每個打開的熔斷器是否已經過久
+                try:
+                    from circuit_breaker import CircuitBreaker
+                    
+                    for circuit_name in open_circuits:
+                        # 獲取熔斷器實例
+                        circuit = CircuitBreaker.get_instance(circuit_name)
+                        circuit_state = circuit.get_state()
+                        
+                        # 檢查熔斷器是否應該被重置
+                        state = circuit_state.get('state')
+                        last_failure_time = circuit_state.get('last_failure')
+                        
+                        # 如果熔斷器已開啟超過一天，嘗試重置
+                        if last_failure_time:
+                            if 'time_since_failure' in circuit_state and circuit_state['time_since_failure'] > 86400:  # 24小時
+                                circuit.reset()
+                                actions_taken.append({
+                                    "action": "reset_circuit_breaker",
+                                    "target": circuit_name,
+                                    "success": True,
+                                    "message": f"重置長時間打開的熔斷器 {circuit_name}",
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                except ImportError:
+                    actions_taken.append({
+                        "action": "reset_circuit_breakers",
+                        "target": "all",
+                        "success": False,
+                        "message": "無法導入熔斷器模塊",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                except Exception as e:
+                    actions_taken.append({
+                        "action": "reset_circuit_breakers",
+                        "target": "open",
+                        "success": False,
+                        "message": f"重置熔斷器時出錯: {e}",
+                        "timestamp": datetime.now().isoformat()
+                    })
+            
+            # 確定是否成功修復
+            success_count = sum(1 for action in actions_taken if action.get('success', False))
+            success = success_count > 0 or status == 'ok'
+            
+            return {
+                'success': success,
+                'message': "已重置長時間打開的熔斷器" if actions_taken else "無需修復或無法修復",
+                'actions': actions_taken
+            }
+            
+        except Exception as e:
+            logging.error(f"修復熔斷器時出錯: {e}")
+            return {
+                'success': False,
+                'message': f'修復熔斷器時出錯: {e}',
+                'actions': [],
+                'exception': str(e)
+            }
+    
+    def _check_cache_backup(self):
+        """檢查緩存備份系統"""
+        try:
+            # 導入緩存管理模塊
+            from cache_manage import CACHE_DIR, BACKUP_DIR
+            import os
+            import glob
+            from datetime import datetime, timedelta
+            
+            # 檢查備份目錄是否存在
+            if not os.path.exists(BACKUP_DIR):
+                return {
+                    'status': 'warning',
+                    'message': '緩存備份目錄不存在',
+                    'severity': 'medium'
+                }
+            
+            # 獲取所有備份文件
+            backup_zips = glob.glob(os.path.join(BACKUP_DIR, 'backup_*.zip'))
+            backup_dirs = [d for d in os.listdir(BACKUP_DIR) 
+                        if os.path.isdir(os.path.join(BACKUP_DIR, d)) and d.startswith('backup_')]
+            
+            # 如果沒有備份
+            if not backup_zips and not backup_dirs:
+                return {
+                    'status': 'warning',
+                    'message': '沒有找到緩存備份',
+                    'severity': 'medium'
+                }
+            
+            # 獲取最近一次備份時間
+            if backup_zips:
+                backup_zips.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                last_backup_time = datetime.fromtimestamp(os.path.getmtime(backup_zips[0]))
+            elif backup_dirs:
+                backup_dirs_full = [os.path.join(BACKUP_DIR, d) for d in backup_dirs]
+                backup_dirs_full.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                last_backup_time = datetime.fromtimestamp(os.path.getmtime(backup_dirs_full[0]))
+            else:
+                last_backup_time = None
+            
+            # 檢查最近備份是否過期
+            if last_backup_time:
+                now = datetime.now()
+                days_since_backup = (now - last_backup_time).days
+                
+                if days_since_backup > 7:
+                    status = 'warning'
+                    message = f'最近的緩存備份已 {days_since_backup} 天未更新'
+                    severity = 'medium'
+                elif days_since_backup > 3:
+                    status = 'warning'
+                    message = f'最近的緩存備份已 {days_since_backup} 天未更新'
+                    severity = 'low'
+                else:
+                    status = 'ok'
+                    message = f'最近的緩存備份在 {days_since_backup} 天前'
+                    severity = 'low'
+            else:
+                status = 'warning'
+                message = '無法確定最近備份時間'
+                severity = 'medium'
+            
+            return {
+                'status': status,
+                'message': message,
+                'severity': severity,
+                'details': {
+                    'backup_count': len(backup_zips) + len(backup_dirs),
+                    'backup_zips': len(backup_zips),
+                    'backup_dirs': len(backup_dirs),
+                    'last_backup_time': last_backup_time.isoformat() if last_backup_time else None
+                }
+            }
+            
+        except ImportError:
+            return {
+                'status': 'warning',
+                'message': '無法導入緩存管理模塊',
+                'severity': 'low'
+            }
+        except Exception as e:
+            logging.error(f"檢查緩存備份時出錯: {e}")
+            return {
+                'status': 'error',
+                'message': f'檢查緩存備份時出錯: {e}',
+                'severity': 'medium',
+                'exception': str(e)
+            }
+    
+    def _heal_cache_backup(self, check_result):
+        """修復緩存備份問題"""
+        try:
+            actions_taken = []
+            
+            status = check_result.get('status', 'unknown')
+            details = check_result.get('details', {})
+            
+            if status in ['error', 'warning']:
+                # 創建新的備份
+                try:
+                    from cache_manage import backup_cache, auto_cleanup_backups
+                    
+                    # 建立新備份
+                    backup_result = backup_cache()
+                    
+                    actions_taken.append({
+                        "action": "create_backup",
+                        "target": "cache",
+                        "success": backup_result,
+                        "message": f"{'成功' if backup_result else '失敗'}建立新緩存備份",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+                    # 清理過舊的備份
+                    if backup_result:
+                        cleanup_count = auto_cleanup_backups()
+                        
+                        actions_taken.append({
+                            "action": "cleanup_backups",
+                            "target": "old",
+                            "success": True,
+                            "message": f"清理了 {cleanup_count} 個過舊的備份",
+                            "timestamp": datetime.now().isoformat()
+                        })
+                except ImportError:
+                    actions_taken.append({
+                        "action": "create_backup",
+                        "target": "cache",
+                        "success": False,
+                        "message": "無法導入緩存管理模塊",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                except Exception as e:
+                    actions_taken.append({
+                        "action": "create_backup",
+                        "target": "cache",
+                        "success": False,
+                        "message": f"建立備份時出錯: {e}",
+                        "timestamp": datetime.now().isoformat()
+                    })
+            else:
+                # 如果備份系統正常，執行例行清理
+                try:
+                    from cache_manage import auto_cleanup_backups
+                    
+                    cleanup_count = auto_cleanup_backups()
+                    
+                    actions_taken.append({
+                        "action": "cleanup_backups",
+                        "target": "old",
+                        "success": True,
+                        "message": f"例行清理了 {cleanup_count} 個過舊的備份",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                except ImportError:
+                    pass  # 忽略導入錯誤
+                except Exception as e:
+                    logging.error(f"例行清理備份時出錯: {e}")
+            
+            # 確定是否成功修復
+            success_count = sum(1 for action in actions_taken if action.get('success', False))
+            success = success_count > 0
+            
+            return {
+                'success': success,
+                'message': "已執行備份系統維護操作" if actions_taken else "無需修復",
+                'actions': actions_taken
+            }
+            
+        except Exception as e:
+            logging.error(f"修復緩存備份時出錯: {e}")
+            return {
+                'success': False,
+                'message': f'修復緩存備份時出錯: {e}',
+                'actions': [],
+                'exception': str(e)
+            }
