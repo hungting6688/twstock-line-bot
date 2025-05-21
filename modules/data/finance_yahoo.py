@@ -1,4 +1,5 @@
 """
+modules/data/finance_yahoo.py
 改用 yfinance 獲取 EPS 和股息數據的替代實現
 增強版處理 API 速率限制和連接失敗問題 (2025版)
 """
@@ -15,9 +16,51 @@ import json
 import requests
 from datetime import datetime, timedelta
 
+# 導入連接管理器
+try:
+    from modules.data.connection_manager import (
+        create_robust_session, 
+        test_connection, 
+        is_service_available,
+        wait_for_service, 
+        get_random_user_agent,
+        log_connection_event
+    )
+except ImportError:
+    # 如果連接管理器不存在，使用簡易版本的功能
+    def get_random_user_agent():
+        agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        ]
+        return random.choice(agents)
+    
+    def create_robust_session(**kwargs):
+        return requests.Session()
+    
+    def test_connection(url, **kwargs):
+        try:
+            response = requests.get(url, timeout=5)
+            return response.status_code == 200, f"狀態碼: {response.status_code}"
+        except Exception as e:
+            return False, str(e)
+    
+    def is_service_available(service_name):
+        return True
+    
+    def wait_for_service(service_name):
+        return True
+    
+    def log_connection_event(message, level='info'):
+        print(f"[yahoo_finance] {message}")
+
 # 緩存目錄設置
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '../../cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+# 確保日誌目錄存在
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
 
 # 全局配置參數 - 從環境變量獲取或使用默認值
 MAX_RETRIES = int(os.getenv("YAHOO_FINANCE_RETRY_ATTEMPTS", "5"))
@@ -56,25 +99,22 @@ def test_yahoo_finance_connection():
     - bool: 連接是否正常
     """
     try:
-        # 使用 requests 直接測試連接
-        headers = {
-            "User-Agent": random.choice(USER_AGENTS),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Connection": "keep-alive",
-            "Cache-Control": "max-age=0"
-        }
+        # 使用連接管理器測試連接
+        if not is_service_available('yahoo_finance'):
+            print("[finance_yahoo] ⚠️ Yahoo Finance 服務暫時不可用，等待恢復")
+            return False
         
-        # 直接測試 Yahoo Finance 網站
-        response = requests.get("https://finance.yahoo.com/quote/AAPL", 
-                              headers=headers, 
-                              timeout=(CONNECTION_TIMEOUT, READ_TIMEOUT))
+        success, message = test_connection(
+            "https://finance.yahoo.com/quote/AAPL", 
+            service_name='yahoo_finance',
+            timeout=CONNECTION_TIMEOUT
+        )
         
-        if response.status_code == 200:
+        if success:
             print("[finance_yahoo] ✅ Yahoo Finance API 連接測試成功")
             return True
         else:
-            print(f"[finance_yahoo] ⚠️ Yahoo Finance API 連接測試失敗: 狀態碼 {response.status_code}")
+            print(f"[finance_yahoo] ⚠️ Yahoo Finance API 連接測試失敗: {message}")
             return False
             
     except Exception as e:
@@ -155,6 +195,13 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=72, max_stocks=8
     except Exception as e:
         print(f"[finance_yahoo] ⚠️ scraper 模組獲取數據失敗: {e}")
     
+    # 如果連接測試失敗，直接使用備用數據
+    if not connection_ok:
+        print("[finance_yahoo] ⚠️ 使用備用數據...")
+        from modules.data.scraper import get_hardcoded_eps_data
+        backup_data = get_hardcoded_eps_data()
+        return backup_data
+    
     print("[finance_yahoo] 使用優化的 yfinance 模組獲取 EPS 和股息數據...")
     
     # 獲取熱門股票列表而不是全部股票列表
@@ -171,43 +218,37 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=72, max_stocks=8
         print(f"[finance_yahoo] ✅ 成功獲取 {len(top_stocks)} 檔熱門股票")
     except Exception as e:
         print(f"[finance_yahoo] ⚠️ 無法獲取熱門股票列表: {e}，使用備用清單")
-        top_stocks = [s['stock_id'] for s in get_backup_stock_list()[:100]]
+        top_stocks = [s for s in get_backup_stock_list()[:100]]
     
-    # 優先處理常見大型股
-    result = {}
+    # 使用連接管理器的等待機制
+    wait_for_service('yahoo_finance')
     
-    # 1. 首先處理優先股票
-    priority_stocks = [s for s in PRIORITY_STOCKS if s in top_stocks]
-    print(f"[finance_yahoo] 優先處理 {len(priority_stocks)} 檔重要股票")
+    # 使用備用數據作為基礎，然後增量更新
+    from modules.data.scraper import get_hardcoded_eps_data
+    result = get_hardcoded_eps_data()
+    print(f"[finance_yahoo] ✅ 載入了 {len(result)} 檔備用股票數據作為基礎")
     
-    # 使用多線程並行處理優先股票，但限制並行數
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(fetch_single_stock_data_with_retry, stock_id, 3, timeout): stock_id for stock_id in priority_stocks}
+    # 調整批次大小，減少並發，增加間隔
+    actual_batch_size = min(3, batch_size)  # 限制最大3個並發
+    actual_batch_delay = max(8, batch_delay)  # 至少8秒延遲
+    
+    # 計算需要優先更新的股票清單
+    stocks_to_update = [s for s in top_stocks if s not in result]
+    total_to_update = len(stocks_to_update)
+    
+    if total_to_update > max_stocks:
+        stocks_to_update = stocks_to_update[:max_stocks]
+        print(f"[finance_yahoo] ⚠️ 限制更新 {max_stocks}/{total_to_update} 檔股票數據")
+    
+    print(f"[finance_yahoo] 開始更新 {len(stocks_to_update)} 檔股票的財務數據...")
+    
+    # 分批處理，減小批次大小並增加間隔
+    processed_count = 0
+    for i in range(0, len(stocks_to_update), actual_batch_size):
+        batch = stocks_to_update[i:i+actual_batch_size]
+        print(f"[finance_yahoo] 處理批次 {i//actual_batch_size + 1}/{(len(stocks_to_update)-1)//actual_batch_size + 1} ({len(batch)} 檔股票)")
         
-        for future in concurrent.futures.as_completed(futures):
-            stock_id = futures[future]
-            try:
-                data = future.result()
-                if data and (data["eps"] is not None or data["dividend"] is not None):
-                    result[stock_id] = data
-                    print(f"[finance_yahoo] ✅ 成功獲取 {stock_id} 數據")
-                else:
-                    print(f"[finance_yahoo] ⚠️ {stock_id} 未獲得有效數據")
-            except Exception as e:
-                print(f"[finance_yahoo] ⚠️ 處理優先股 {stock_id} 時出錯: {e}")
-    
-    # 2. 處理剩餘的熱門股票，直到達到最大處理數量
-    remaining_stocks = [s for s in top_stocks if s not in priority_stocks]
-    remaining_to_process = remaining_stocks[:max_stocks - len(result)]
-    
-    print(f"[finance_yahoo] 處理剩餘 {len(remaining_to_process)} 檔股票")
-    
-    # 分批處理，批次大小由參數控制
-    for i in range(0, len(remaining_to_process), batch_size):
-        batch = remaining_to_process[i:i+batch_size]
-        print(f"[finance_yahoo] 處理批次 {i//batch_size + 1}/{(len(remaining_to_process)-1)//batch_size + 1} ({len(batch)} 檔股票)")
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=actual_batch_size) as executor:
             futures = {executor.submit(fetch_single_stock_data_with_retry, stock_id, 2, timeout): stock_id for stock_id in batch}
             
             for future in concurrent.futures.as_completed(futures):
@@ -216,21 +257,24 @@ def get_eps_data_alternative(use_cache=True, cache_expiry_hours=72, max_stocks=8
                     data = future.result()
                     if data and (data["eps"] is not None or data["dividend"] is not None):
                         result[stock_id] = data
+                        processed_count += 1
                     else:
                         # 設置默認值避免後續處理出錯
-                        result[stock_id] = {"eps": None, "dividend": None}
+                        if stock_id not in result:
+                            result[stock_id] = {"eps": None, "dividend": None}
                 except Exception as e:
                     print(f"[finance_yahoo] ⚠️ 處理 {stock_id} 時出錯: {e}")
                     # 設置默認值避免後續處理出錯
-                    result[stock_id] = {"eps": None, "dividend": None}
+                    if stock_id not in result:
+                        result[stock_id] = {"eps": None, "dividend": None}
         
-        # 批次間添加延遲，避免 API 限制
-        if i + batch_size < len(remaining_to_process):
-            delay = batch_delay + random.uniform(0.5, 1.5)
+        # 批次間添加更長的延遲，避免 API 限制
+        if i + actual_batch_size < len(stocks_to_update):
+            delay = actual_batch_delay + random.uniform(1.0, 3.0)
             print(f"[finance_yahoo] 等待 {delay:.1f} 秒後處理下一批...")
             time.sleep(delay)
     
-    print(f"[finance_yahoo] ✅ 成功獲取 {len(result)} 檔股票的財務數據")
+    print(f"[finance_yahoo] ✅ 成功更新 {processed_count} 檔股票的財務數據")
     
     # 儲存結果到緩存
     if use_cache and result:
@@ -254,7 +298,7 @@ def get_current_mode():
     返回:
     - 'morning', 'noon', 'afternoon', 或 'evening'
     """
-    current_hour = (datetime.now() + timedelta(hours=8)).hour  # 台灣時間
+    current_hour = datetime.now().hour  # 直接使用本地時間
     
     if current_hour < 10:
         return 'morning'
@@ -276,12 +320,12 @@ def get_scan_limit_for_mode(mode):
     - 掃描限制數量
     """
     limits = {
-        'morning': 100,  # 早盤保持100檔掃描
-        'afternoon': 50,
-        'noon': 50,
-        'evening': 100
+        'morning': 60,   # 降低掃描限制以避免API超載
+        'afternoon': 40,
+        'noon': 40,
+        'evening': 60
     }
-    return limits.get(mode, 50)
+    return limits.get(mode, 40)
 
 def fetch_single_stock_data_with_retry(stock_id, max_retries=2, timeout=20):
     """
@@ -466,36 +510,10 @@ def get_dividend_data_alternative(use_cache=True, cache_expiry_hours=72):
 def get_backup_stock_list():
     """提供備用的上市股票列表 - 2025年更新版"""
     backup_stocks = [
-        {"stock_id": "2330", "stock_name": "台積電", "market_type": "上市", "industry": "半導體業"},
-        {"stock_id": "2317", "stock_name": "鴻海", "market_type": "上市", "industry": "電子零組件業"},
-        {"stock_id": "2303", "stock_name": "聯電", "market_type": "上市", "industry": "半導體業"},
-        {"stock_id": "2308", "stock_name": "台達電", "market_type": "上市", "industry": "電子零組件業"},
-        {"stock_id": "2454", "stock_name": "聯發科", "market_type": "上市", "industry": "半導體業"},
-        {"stock_id": "2412", "stock_name": "中華電", "market_type": "上市", "industry": "電信業"},
-        {"stock_id": "2882", "stock_name": "國泰金", "market_type": "上市", "industry": "金融業"},
-        {"stock_id": "1301", "stock_name": "台塑", "market_type": "上市", "industry": "塑膠工業"},
-        {"stock_id": "1303", "stock_name": "南亞", "market_type": "上市", "industry": "塑膠工業"},
-        {"stock_id": "2881", "stock_name": "富邦金", "market_type": "上市", "industry": "金融業"},
-        {"stock_id": "1216", "stock_name": "統一", "market_type": "上市", "industry": "食品工業"},
-        {"stock_id": "2002", "stock_name": "中鋼", "market_type": "上市", "industry": "鋼鐵工業"},
-        {"stock_id": "2886", "stock_name": "兆豐金", "market_type": "上市", "industry": "金融業"},
-        {"stock_id": "1101", "stock_name": "台泥", "market_type": "上市", "industry": "水泥工業"},
-        {"stock_id": "2891", "stock_name": "中信金", "market_type": "上市", "industry": "金融業"},
-        {"stock_id": "3711", "stock_name": "日月光投控", "market_type": "上市", "industry": "半導體業"},
-        {"stock_id": "2327", "stock_name": "國巨", "market_type": "上市", "industry": "電子零組件業"},
-        {"stock_id": "2912", "stock_name": "統一超", "market_type": "上市", "industry": "貿易百貨"},
-        {"stock_id": "2207", "stock_name": "和泰車", "market_type": "上市", "industry": "汽車工業"},
-        {"stock_id": "2884", "stock_name": "玉山金", "market_type": "上市", "industry": "金融業"},
-        {"stock_id": "2382", "stock_name": "廣達", "market_type": "上市", "industry": "電腦及週邊設備業"},
-        {"stock_id": "2609", "stock_name": "陽明", "market_type": "上市", "industry": "航運業"},
-        {"stock_id": "6505", "stock_name": "台塑化", "market_type": "上市", "industry": "石油、煤製品業"},
-        {"stock_id": "2892", "stock_name": "第一金", "market_type": "上市", "industry": "金融業"},
-        {"stock_id": "2887", "stock_name": "台新金", "market_type": "上市", "industry": "金融業"},
-        {"stock_id": "2345", "stock_name": "智邦", "market_type": "上市", "industry": "通信網路業"},
-        {"stock_id": "3008", "stock_name": "大立光", "market_type": "上市", "industry": "光電業"},
-        {"stock_id": "2615", "stock_name": "萬海", "market_type": "上市", "industry": "航運業"},
-        {"stock_id": "5880", "stock_name": "合庫金", "market_type": "上市", "industry": "金融業"},
-        {"stock_id": "3045", "stock_name": "台灣大", "market_type": "上市", "industry": "電信業"}
+        "2330", "2317", "2303", "2308", "2454", "2412", "2882", "1301", 
+        "1303", "2881", "1216", "2002", "2886", "1101", "2891", "3711", 
+        "2327", "2912", "2207", "2884", "2382", "2609", "6505", "2892", 
+        "2887", "2345", "3008", "2615", "5880", "3045"
     ]
     return backup_stocks
 
@@ -627,6 +645,17 @@ def get_stock_price_history(stock_id, period="60d", retry_on_rate_limit=True, ti
             print(f"[finance_yahoo] ❌ {stock_id} 最終請求失敗，已重試 {max_retries} 次")
     
     return pd.DataFrame()
+
+def log_to_file(message, level='INFO'):
+    """記錄資訊到日誌檔案"""
+    try:
+        log_file = os.path.join(LOG_DIR, 'yahoo_finance.log')
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{timestamp} [{level}] {message}\n")
+    except Exception as e:
+        print(f"[finance_yahoo] 無法寫入日誌: {e}")
 
 # 當模組被直接執行時運行的代碼
 if __name__ == "__main__":
