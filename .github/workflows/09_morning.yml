@@ -8,7 +8,7 @@ on:
 jobs:
   run-morning:
     runs-on: ubuntu-latest
-    timeout-minutes: 25  # 增加執行超時設定至25分鐘
+    timeout-minutes: 30  # 增加執行超時設定至30分鐘
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -20,6 +20,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install requests[socks]  # 增加 SOCKS 代理支持
           
       - name: Set timezone
         run: |
@@ -35,29 +36,41 @@ jobs:
         run: |
           echo "測試網絡連接..."
           # 使用 curl 比 ping 提供更多信息，而且 ping 可能會被防火牆阻擋
-          curl -I https://finance.yahoo.com || echo "curl 失敗但繼續執行"
-          curl -I https://mops.twse.com.tw || echo "curl 失敗但繼續執行"
-          curl -I https://www.twse.com.tw || echo "curl 失敗但繼續執行"
+          curl -v -I https://finance.yahoo.com || echo "curl 失敗但繼續執行"
+          curl -v -I https://mops.twse.com.tw || echo "curl 失敗但繼續執行"
+          curl -v -I https://www.twse.com.tw || echo "curl 失敗但繼續執行"
+          
+          # 輸出更多網絡診斷信息
+          echo "執行網絡診斷..."
+          ip addr
+          echo "DNS 解析測試:"
+          nslookup finance.yahoo.com
+          nslookup mops.twse.com.tw
+          nslookup www.twse.com.tw
       
+      - name: Create logs directory
+        run: mkdir -p logs
+        
       - name: Configure retry and timeout settings
         run: |
-          # 設置更多環境變量來控制重試和超時
-          echo "YAHOO_FINANCE_RETRY_ATTEMPTS=5" >> $GITHUB_ENV
-          echo "YAHOO_FINANCE_BATCH_DELAY=5" >> $GITHUB_ENV
-          echo "YAHOO_FINANCE_CONNECTION_TIMEOUT=10" >> $GITHUB_ENV
-          echo "YAHOO_FINANCE_READ_TIMEOUT=15" >> $GITHUB_ENV
+          # 設置更多環境變量來控制重試和超時，避免過快請求
+          echo "YAHOO_FINANCE_RETRY_ATTEMPTS=3" >> $GITHUB_ENV
+          echo "YAHOO_FINANCE_BATCH_DELAY=10" >> $GITHUB_ENV
+          echo "YAHOO_FINANCE_CONNECTION_TIMEOUT=15" >> $GITHUB_ENV
+          echo "YAHOO_FINANCE_READ_TIMEOUT=30" >> $GITHUB_ENV
           
-          echo "SCRAPER_MAX_RETRIES=3" >> $GITHUB_ENV
-          echo "SCRAPER_CONNECTION_TIMEOUT=10" >> $GITHUB_ENV
-          echo "SCRAPER_READ_TIMEOUT=15" >> $GITHUB_ENV
-          echo "SCRAPER_BATCH_DELAY=2" >> $GITHUB_ENV
+          echo "SCRAPER_MAX_RETRIES=2" >> $GITHUB_ENV
+          echo "SCRAPER_CONNECTION_TIMEOUT=15" >> $GITHUB_ENV
+          echo "SCRAPER_READ_TIMEOUT=30" >> $GITHUB_ENV
+          echo "SCRAPER_BATCH_DELAY=5" >> $GITHUB_ENV
           
       - name: Clear cache if needed
         run: |
           python -c "
-          import os, glob, time
+          import os, glob, time, json
           cache_dir = 'cache'
           if os.path.exists(cache_dir):
+              # 更有選擇性地清理緩存，過期時間延長到7天
               files = glob.glob(os.path.join(cache_dir, '*.json'))
               now = time.time()
               week_ago = now - 7*24*60*60
@@ -65,6 +78,19 @@ jobs:
               for f in expired:
                   os.remove(f)
                   print(f'已刪除過期緩存：{os.path.basename(f)}')
+              
+              # 輸出緩存狀態
+              print('目前緩存檔案:')
+              for f in glob.glob(os.path.join(cache_dir, '*.json')):
+                  try:
+                      with open(f, 'r', encoding='utf-8') as file:
+                          data = json.load(file)
+                          if 'timestamp' in data:
+                              print(f'{os.path.basename(f)} - 更新時間: {data[\"timestamp\"]}')
+                          else:
+                              print(f'{os.path.basename(f)} - 大小: {os.path.getsize(f)} 字節')
+                  except:
+                      print(f'{os.path.basename(f)} - 無法讀取')
           "
       
       - name: Run Morning Recommendations
@@ -78,21 +104,41 @@ jobs:
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
           TZ: "Asia/Taipei"  # 設置環境變量
         run: |
-          # 使用多次重試機制執行主程序
+          # 使用多次重試機制執行主程序，並添加日誌記錄
           MAX_ATTEMPTS=3
           for i in $(seq 1 $MAX_ATTEMPTS); do
             echo "執行嘗試 $i/$MAX_ATTEMPTS..."
-            if python main.py --mode=morning; then
+            # 將輸出同時寫入日誌檔和標準輸出
+            if python main.py --mode=morning 2>&1 | tee logs/morning_run_$(date +%Y%m%d_%H%M%S
+            # 使用多次重試機制執行主程序，並添加日誌記錄
+          MAX_ATTEMPTS=3
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo "執行嘗試 $i/$MAX_ATTEMPTS..."
+            # 將輸出同時寫入日誌檔和標準輸出
+            if python main.py --mode=morning 2>&1 | tee logs/morning_run_$(date +%Y%m%d_%H%M%S).log; then
               echo "成功完成早盤推薦！"
               exit 0
             else
               echo "嘗試 $i 失敗，退出碼: $?"
               if [ $i -lt $MAX_ATTEMPTS ]; then
-                echo "等待 30 秒後重試..."
-                sleep 30
+                echo "等待 45 秒後重試..." # 增加等待時間
+                sleep 45
               else
                 echo "已達最大重試次數，放棄執行"
+                # 即使失敗，也嘗試發送通知
+                python -c "
+                from modules.notification.dual_notifier import send_notification
+                send_notification('早盤推薦執行失敗，請檢查系統日誌', '系統錯誤通知')
+                "
                 exit 1
               fi
             fi
           done
+          
+      - name: Archive logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: morning-logs-$(date +%Y%m%d)
+          path: logs/
+          retention-days: 7
