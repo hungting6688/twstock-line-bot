@@ -11,7 +11,7 @@ import json
 import traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 確保日誌目錄存在
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
@@ -25,14 +25,19 @@ NOTIFICATION_CONFIG = {
         'user': os.getenv('EMAIL_SENDER'),
         'password': os.getenv('EMAIL_PASSWORD'),
         'to': os.getenv('EMAIL_RECEIVER'),
-        'retry_count': 3,
-        'retry_delay': 5  # 秒
+        'retry_count': int(os.getenv('EMAIL_RETRY_COUNT', '3')),
+        'retry_delay': int(os.getenv('EMAIL_RETRY_DELAY', '5'))  # 秒
     },
     'line': {
         'token': os.getenv('LINE_CHANNEL_ACCESS_TOKEN'),
         'user_id': os.getenv('LINE_USER_ID'),
-        'retry_count': 3,
-        'retry_delay': 5  # 秒
+        'retry_count': int(os.getenv('LINE_RETRY_COUNT', '3')),
+        'retry_delay': int(os.getenv('LINE_RETRY_DELAY', '5'))  # 秒
+    },
+    'backup': {
+        'enabled': os.getenv('BACKUP_NOTIFICATIONS_ENABLED', 'true').lower() in ('true', 'yes', '1', 'on'),
+        'retention_days': int(os.getenv('NOTIFICATION_BACKUP_RETENTION', '30')),
+        'interval_minutes': int(os.getenv('NOTIFICATION_RETRY_INTERVAL', '60'))  # 失敗通知重試間隔(分鐘)
     }
 }
 
@@ -40,13 +45,24 @@ NOTIFICATION_CONFIG = {
 NOTIFICATION_LOG = {
     'last_email_success': None,
     'last_line_success': None,
+    'last_retry_check': None,
+    'email_stats': {
+        'total_sent': 0,
+        'successful': 0,
+        'failed': 0
+    },
+    'line_stats': {
+        'total_sent': 0,
+        'successful': 0,
+        'failed': 0
+    },
     'failed_attempts': {
         'email': 0,
         'line': 0
     }
 }
 
-def send_notification(message, subject, html_body=None, retry=True):
+def send_notification(message, subject, html_body=None, retry=True, urgent=False):
     """
     發送通知(郵件和LINE)，增加錯誤處理和重試機制
     
@@ -55,6 +71,10 @@ def send_notification(message, subject, html_body=None, retry=True):
     - subject: 郵件主題
     - html_body: HTML格式的郵件正文(可選)
     - retry: 是否啟用重試機制
+    - urgent: 是否為緊急通知（影響重試策略）
+    
+    返回:
+    - bool: 通知是否成功發送
     """
     # 嘗試發送電子郵件
     email_success = send_email(message, subject, html_body, retry)
@@ -64,7 +84,7 @@ def send_notification(message, subject, html_body=None, retry=True):
     
     # 如果兩種方式都失敗，寫入本地日誌
     if not email_success and not line_success:
-        log_notification_failure(message, subject)
+        log_notification_failure(message, subject, html_body, urgent)
         return False
     
     return True
@@ -78,6 +98,9 @@ def send_email(message, subject, html_body=None, retry=True):
     - subject: 郵件主題
     - html_body: HTML格式的郵件正文(可選)
     - retry: 是否啟用重試機制
+    
+    返回:
+    - bool: 郵件是否成功發送
     """
     try:
         # 獲取郵件設置
@@ -88,8 +111,13 @@ def send_email(message, subject, html_body=None, retry=True):
         smtp_password = email_config.get('password')
         email_to = email_config.get('to')
         
+        # 更新發送統計
+        NOTIFICATION_LOG['email_stats']['total_sent'] += 1
+        
         if not all([smtp_server, smtp_port, smtp_user, smtp_password, email_to]):
             log_notification_event("郵件設置不完整，跳過發送", 'warning')
+            NOTIFICATION_LOG['email_stats']['failed'] += 1
+            save_notification_log()
             return False
         
         # 創建郵件物件
@@ -106,6 +134,7 @@ def send_email(message, subject, html_body=None, retry=True):
         msg['Subject'] = subject
         msg['From'] = smtp_user
         msg['To'] = email_to
+        msg['Date'] = datetime.now().strftime("%a, %d %b %Y %H:%M:%S +0800")
         
         # 增加重試邏輯
         max_retries = email_config.get('retry_count', 3) if retry else 1
@@ -129,6 +158,7 @@ def send_email(message, subject, html_body=None, retry=True):
                 log_notification_event("郵件發送成功")
                 NOTIFICATION_LOG['last_email_success'] = datetime.now().isoformat()
                 NOTIFICATION_LOG['failed_attempts']['email'] = 0
+                NOTIFICATION_LOG['email_stats']['successful'] += 1
                 save_notification_log()
                 return True
                 
@@ -141,15 +171,23 @@ def send_email(message, subject, html_body=None, retry=True):
                     retry_delay *= 2  # 指數退避策略
                 else:
                     log_notification_event(f"郵件發送最終失敗: {e}", 'error')
+                    NOTIFICATION_LOG['email_stats']['failed'] += 1
+                    save_notification_log()
                     
                     # 嘗試不同的SMTP連接方式
                     backup_result = try_alternative_smtp(msg, smtp_user, smtp_password, email_to)
-                    save_notification_log()
+                    if backup_result:
+                        NOTIFICATION_LOG['email_stats']['successful'] += 1
+                        NOTIFICATION_LOG['email_stats']['failed'] -= 1  # 修正失敗計數
+                        save_notification_log()
+                    
                     return backup_result
         
     except Exception as e:
         log_notification_event(f"郵件發送發生異常: {e}", 'error')
+        log_notification_event(traceback.format_exc(), 'error')
         NOTIFICATION_LOG['failed_attempts']['email'] += 1
+        NOTIFICATION_LOG['email_stats']['failed'] += 1
         save_notification_log()
         return False
 
@@ -162,12 +200,13 @@ def try_alternative_smtp(msg, smtp_user, smtp_password, email_to):
         if not all([smtp_user, smtp_password, email_to]):
             return False
 
-        # Gmail 的備用端口和其他郵件服務
+        # Gmail 的備用端口
         alternate_settings = [
-            ("smtp.gmail.com", 465, True),   # Gmail SSL
-            ("smtp.gmail.com", 587, False),  # Gmail TLS
-            ("smtp.mail.yahoo.com", 465, True),  # Yahoo Mail
-            ("smtp-mail.outlook.com", 587, False),  # Outlook/Hotmail
+            ("smtp.gmail.com", 465, True),   # SSL
+            ("smtp.gmail.com", 587, False),  # TLS
+            ("smtp.gmail.com", 25, False),   # 基本
+            ("smtp-mail.outlook.com", 587, False),  # Outlook
+            ("smtp.mail.yahoo.com", 587, False)     # Yahoo
         ]
         
         for server, port, use_ssl in alternate_settings:
@@ -186,7 +225,10 @@ def try_alternative_smtp(msg, smtp_user, smtp_password, email_to):
                         smtp.login(smtp_user, smtp_password)
                         smtp.send_message(msg)
                         
-                log_notification_event(f"備用郵件伺服器 {server}:{port} 發送成功")
+                log_notification_event(f"備用郵件伺服器發送成功")
+                NOTIFICATION_LOG['last_email_success'] = datetime.now().isoformat()
+                NOTIFICATION_LOG['failed_attempts']['email'] = 0
+                save_notification_log()
                 return True
                 
             except Exception as e:
@@ -204,69 +246,132 @@ def send_line_notify(message, retry=True):
     參數:
     - message: 通知文本內容
     - retry: 是否啟用重試機制
+    
+    返回:
+    - bool: 通知是否成功發送
     """
     try:
         # 獲取LINE設置
         line_config = NOTIFICATION_CONFIG.get('line', {})
         token = line_config.get('token')
         
+        # 更新發送統計
+        NOTIFICATION_LOG['line_stats']['total_sent'] += 1
+        
         if not token:
             log_notification_event("LINE設置不完整，跳過發送", 'warning')
+            NOTIFICATION_LOG['line_stats']['failed'] += 1
+            save_notification_log()
             return False
+        
+        # 消息長度檢查和分割
+        max_message_length = 1000  # LINE Notify的消息長度限制
+        messages = []
+        
+        if len(message) > max_message_length:
+            # 分割消息
+            chunks = [message[i:i+max_message_length] for i in range(0, len(message), max_message_length)]
+            
+            for i, chunk in enumerate(chunks):
+                if i == 0:
+                    messages.append(chunk)
+                else:
+                    messages.append(f"(續) {chunk}")
+        else:
+            messages = [message]
         
         # 增加重試邏輯
         max_retries = line_config.get('retry_count', 3) if retry else 1
         retry_delay = line_config.get('retry_delay', 5)  # 秒
         
-        for attempt in range(max_retries):
-            try:
-                # 發送LINE通知
-                url = 'https://notify-api.line.me/api/notify'
-                headers = {'Authorization': f'Bearer {token}'}
-                data = {'message': message}
-                
-                response = requests.post(url, headers=headers, data=data, timeout=30)
-                
-                if response.status_code == 200:
-                    log_notification_event("LINE通知發送成功")
-                    NOTIFICATION_LOG['last_line_success'] = datetime.now().isoformat()
-                    NOTIFICATION_LOG['failed_attempts']['line'] = 0
-                    save_notification_log()
-                    return True
-                else:
-                    raise Exception(f"HTTP狀態碼: {response.status_code}, 回應: {response.text}")
+        all_success = True
+        
+        for msg_part in messages:
+            success = False
+            
+            for attempt in range(max_retries):
+                try:
+                    # 發送LINE通知
+                    url = 'https://notify-api.line.me/api/notify'
+                    headers = {'Authorization': f'Bearer {token}'}
+                    data = {'message': msg_part}
                     
-            except Exception as e:
-                NOTIFICATION_LOG['failed_attempts']['line'] += 1
-                
-                if attempt < max_retries - 1:
-                    log_notification_event(f"LINE通知發送失敗 (嘗試 {attempt+1}/{max_retries}): {e}", 'warning')
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # 指數退避策略
-                else:
-                    log_notification_event(f"LINE通知最終失敗: {e}", 'error')
-                    save_notification_log()
-                    return False
+                    response = requests.post(url, headers=headers, data=data, timeout=30)
+                    
+                    if response.status_code == 200:
+                        success = True
+                        break
+                    else:
+                        raise Exception(f"HTTP狀態碼: {response.status_code}, 回應: {response.text}")
+                        
+                except Exception as e:
+                    NOTIFICATION_LOG['failed_attempts']['line'] += 1
+                    
+                    if attempt < max_retries - 1:
+                        log_notification_event(f"LINE通知發送失敗 (嘗試 {attempt+1}/{max_retries}): {e}", 'warning')
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # 指數退避策略
+                    else:
+                        log_notification_event(f"LINE通知最終失敗: {e}", 'error')
+            
+            all_success = all_success and success
+            
+            # 分段消息之間添加延遲，避免速率限制
+            if len(messages) > 1 and msg_part != messages[-1]:
+                time.sleep(1)
+        
+        if all_success:
+            log_notification_event("LINE通知發送成功")
+            NOTIFICATION_LOG['last_line_success'] = datetime.now().isoformat()
+            NOTIFICATION_LOG['failed_attempts']['line'] = 0
+            NOTIFICATION_LOG['line_stats']['successful'] += 1
+        else:
+            NOTIFICATION_LOG['line_stats']['failed'] += 1
+            
+        save_notification_log()
+        return all_success
                     
     except Exception as e:
         log_notification_event(f"LINE通知發送發生異常: {e}", 'error')
+        log_notification_event(traceback.format_exc(), 'error')
         NOTIFICATION_LOG['failed_attempts']['line'] += 1
+        NOTIFICATION_LOG['line_stats']['failed'] += 1
         save_notification_log()
         return False
 
-def log_notification_failure(message, subject):
+def log_notification_failure(message, subject, html_body=None, urgent=False):
     """記錄發送失敗的通知到本地文件，以便後續重試"""
     try:
-        log_file = os.path.join(LOG_DIR, 'failed_notifications.log')
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        failed_dir = os.path.join(LOG_DIR, 'failed_notifications')
+        os.makedirs(failed_dir, exist_ok=True)
         
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"failed_{timestamp}{'_urgent' if urgent else ''}.json"
+        failed_file = os.path.join(failed_dir, filename)
+        
+        failed_data = {
+            'timestamp': datetime.now().isoformat(),
+            'subject': subject,
+            'message': message,
+            'html_body': html_body,
+            'urgent': urgent,
+            'retry_count': 0,
+            'last_retry': None
+        }
+        
+        with open(failed_file, 'w', encoding='utf-8') as f:
+            json.dump(failed_data, f, ensure_ascii=False, indent=2)
+            
+        log_notification_event(f"通知失敗，已記錄到 {failed_file}")
+        
+        # 同時保存到綜合日誌
+        log_file = os.path.join(LOG_DIR, 'failed_notifications.log')
         with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"===== {timestamp} =====\n")
+            f.write(f"===== {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====\n")
             f.write(f"主題: {subject}\n")
+            f.write(f"緊急: {'是' if urgent else '否'}\n")
             f.write(f"內容:\n{message}\n")
             f.write("="*50 + "\n\n")
-            
-        log_notification_event(f"通知失敗，已記錄到 {log_file}")
     except Exception as e:
         log_notification_event(f"無法記錄失敗的通知: {e}", 'error')
 
@@ -295,6 +400,10 @@ def save_notification_log():
     """保存通知日誌狀態"""
     try:
         log_stats_file = os.path.join(LOG_DIR, 'notification_stats.json')
+        
+        # 添加上次保存時間
+        NOTIFICATION_LOG['last_updated'] = datetime.now().isoformat()
+        
         with open(log_stats_file, 'w', encoding='utf-8') as f:
             json.dump(NOTIFICATION_LOG, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -307,75 +416,195 @@ def load_notification_log():
         if os.path.exists(log_stats_file):
             with open(log_stats_file, 'r', encoding='utf-8') as f:
                 loaded_data = json.load(f)
-                NOTIFICATION_LOG.update(loaded_data)
+                for key, value in loaded_data.items():
+                    NOTIFICATION_LOG[key] = value
             log_notification_event("已載入通知統計數據")
     except Exception as e:
         log_notification_event(f"無法載入通知統計數據: {e}", 'warning')
 
-def retry_failed_notifications():
-    """重試之前失敗的通知"""
-    log_file = os.path.join(LOG_DIR, 'failed_notifications.log')
-    if not os.path.exists(log_file):
-        return
+def retry_failed_notifications(max_retries=None, only_urgent=False):
+    """
+    重試之前失敗的通知
     
-    try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # 清空原始日誌
-        with open(log_file, 'w', encoding='utf-8') as f:
-            f.write('')
-        
-        # 解析失敗通知
-        sections = content.split('=' * 50)
-        notifications = []
-        
-        for section in sections:
-            if not section.strip():
-                continue
+    參數:
+    - max_retries: 最大重試次數，None表示不限制
+    - only_urgent: 是否只重試緊急通知
+    
+    返回:
+    - 元組: (重試次數, 成功次數)
+    """
+    failed_dir = os.path.join(LOG_DIR, 'failed_notifications')
+    if not os.path.exists(failed_dir):
+        return 0, 0
+    
+    # 更新上次檢查時間
+    NOTIFICATION_LOG['last_retry_check'] = datetime.now().isoformat()
+    save_notification_log()
+    
+    # 重試間隔時間
+    retry_interval_minutes = NOTIFICATION_CONFIG.get('backup', {}).get('interval_minutes', 60)
+    min_retry_age = datetime.now() - timedelta(minutes=retry_interval_minutes)
+    
+    # 獲取失敗通知文件列表
+    failed_files = []
+    for filename in os.listdir(failed_dir):
+        if filename.startswith('failed_') and filename.endswith('.json'):
+            failed_files.append(os.path.join(failed_dir, filename))
+    
+    if not failed_files:
+        return 0, 0
+    
+    retry_count = 0
+    success_count = 0
+    
+    for file_path in failed_files:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                notification_data = json.load(f)
             
-            lines = section.strip().split('\n')
-            if len(lines) < 3:
+            # 檢查是否符合條件進行重試
+            if only_urgent and not notification_data.get('urgent', False):
                 continue
+                
+            # 檢查重試次數限制
+            current_retries = notification_data.get('retry_count', 0)
+            if max_retries is not None and current_retries >= max_retries:
+                continue
+                
+            # 檢查上次重試時間，避免頻繁重試
+            last_retry_str = notification_data.get('last_retry')
+            if last_retry_str:
+                last_retry = datetime.fromisoformat(last_retry_str)
+                if last_retry > min_retry_age:
+                    continue
             
-            try:
-                # 解析主題和內容
-                timestamp_line = lines[0].strip()
-                subject_line = lines[1].strip()
-                subject = subject_line.replace('主題: ', '', 1)
+            # 執行重試
+            subject = notification_data.get('subject', '重試通知')
+            message = notification_data.get('message', '')
+            html_body = notification_data.get('html_body')
+            
+            log_notification_event(f"重試發送通知：{subject}（第 {current_retries + 1} 次）")
+            
+            # 嘗試發送
+            success = send_notification(message, subject, html_body, retry=True, urgent=notification_data.get('urgent', False))
+            retry_count += 1
+            
+            if success:
+                # 發送成功，刪除失敗記錄
+                os.remove(file_path)
+                success_count += 1
+                log_notification_event(f"重試成功，已刪除失敗記錄: {os.path.basename(file_path)}")
+            else:
+                # 發送失敗，更新重試計數
+                notification_data['retry_count'] = current_retries + 1
+                notification_data['last_retry'] = datetime.now().isoformat()
                 
-                # 收集剩餘行作為消息內容
-                message_start = False
-                message_lines = []
-                for line in lines[2:]:
-                    if line.startswith('內容:'):
-                        message_start = True
-                        continue
-                    if message_start:
-                        message_lines.append(line)
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(notification_data, f, ensure_ascii=False, indent=2)
                 
-                message = '\n'.join(message_lines)
-                notifications.append((subject, message))
-            except Exception as e:
-                log_notification_event(f"解析失敗通知格式錯誤: {e}", 'warning')
+                log_notification_event(f"重試失敗，已更新重試計數: {os.path.basename(file_path)}", 'warning')
+        except Exception as e:
+            log_notification_event(f"處理失敗通知文件出錯: {e}", 'error')
+    
+    return retry_count, success_count
+
+def cleanup_old_failed_notifications():
+    """
+    清理舊的失敗通知記錄
+    
+    返回:
+    - 已清理的文件數量
+    """
+    failed_dir = os.path.join(LOG_DIR, 'failed_notifications')
+    if not os.path.exists(failed_dir):
+        return 0
+    
+    # 獲取保留天數設置
+    retention_days = NOTIFICATION_CONFIG.get('backup', {}).get('retention_days', 30)
+    cutoff_date = datetime.now() - timedelta(days=retention_days)
+    
+    # 統計已清理的文件數量
+    cleaned_count = 0
+    
+    for filename in os.listdir(failed_dir):
+        if not filename.startswith('failed_') or not filename.endswith('.json'):
+            continue
+            
+        file_path = os.path.join(failed_dir, filename)
         
-        # 重試發送
-        success_count = 0
-        for subject, message in notifications:
-            try:
-                if send_notification(message, subject):
-                    success_count += 1
-                else:
-                    # 如果仍然失敗，重新記錄
-                    log_notification_failure(message, subject)
-            except Exception as e:
-                log_notification_event(f"重試發送通知失敗: {e}", 'warning')
-                log_notification_failure(message, subject)
-        
-        if success_count > 0:
-            log_notification_event(f"成功重試發送 {success_count}/{len(notifications)} 條之前失敗的通知")
-    except Exception as e:
-        log_notification_event(f"重試失敗通知時發生錯誤: {e}", 'error')
+        try:
+            # 檢查文件修改時間
+            file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+            
+            if file_time < cutoff_date:
+                # 檢查文件內容中的時間戳
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    
+                    timestamp = data.get('timestamp')
+                    if timestamp:
+                        file_date = datetime.fromisoformat(timestamp)
+                        if file_date > cutoff_date:
+                            # 文件時間超過但內容時間還沒有，保留文件
+                            continue
+                except:
+                    # 讀取文件內容失敗，基於文件時間判斷
+                    pass
+                
+                # 刪除文件
+                os.remove(file_path)
+                log_notification_event(f"清理過期的失敗通知記錄: {filename}")
+                cleaned_count += 1
+                
+        except Exception as e:
+            log_notification_event(f"處理文件 {filename} 時出錯: {e}", 'warning')
+    
+    return cleaned_count
+
+def get_notification_stats():
+    """
+    獲取通知系統統計數據
+    
+    返回:
+    - dict: 通知統計數據
+    """
+    # 獲取失敗通知數量
+    failed_dir = os.path.join(LOG_DIR, 'failed_notifications')
+    failed_count = 0
+    if os.path.exists(failed_dir):
+        failed_count = len([f for f in os.listdir(failed_dir) if f.startswith('failed_') and f.endswith('.json')])
+    
+    # 計算成功率
+    email_success_rate = 0
+    if NOTIFICATION_LOG['email_stats']['total_sent'] > 0:
+        email_success_rate = round(NOTIFICATION_LOG['email_stats']['successful'] / NOTIFICATION_LOG['email_stats']['total_sent'] * 100, 2)
+    
+    line_success_rate = 0
+    if NOTIFICATION_LOG['line_stats']['total_sent'] > 0:
+        line_success_rate = round(NOTIFICATION_LOG['line_stats']['successful'] / NOTIFICATION_LOG['line_stats']['total_sent'] * 100, 2)
+    
+    return {
+        'email': {
+            'total_sent': NOTIFICATION_LOG['email_stats']['total_sent'],
+            'successful': NOTIFICATION_LOG['email_stats']['successful'],
+            'failed': NOTIFICATION_LOG['email_stats']['failed'],
+            'success_rate': email_success_rate,
+            'last_success': NOTIFICATION_LOG['last_email_success']
+        },
+        'line': {
+            'total_sent': NOTIFICATION_LOG['line_stats']['total_sent'],
+            'successful': NOTIFICATION_LOG['line_stats']['successful'],
+            'failed': NOTIFICATION_LOG['line_stats']['failed'],
+            'success_rate': line_success_rate,
+            'last_success': NOTIFICATION_LOG['last_line_success']
+        },
+        'failed_notifications': {
+            'pending': failed_count,
+            'last_retry_check': NOTIFICATION_LOG['last_retry_check']
+        },
+        'last_updated': datetime.now().isoformat()
+    }
 
 # 初始化時載入之前的通知狀態
 try:
@@ -383,9 +612,12 @@ try:
 except Exception as e:
     print(f"[dual_notifier] 載入通知日誌時出錯: {e}")
 
-# 嘗試重試之前失敗的通知
+# 嘗試重試之前失敗的通知 - 只在加載模組時嘗試緊急通知
 try:
-    retry_failed_notifications()
+    # 先嘗試緊急通知
+    retry_count, success_count = retry_failed_notifications(max_retries=None, only_urgent=True)
+    if retry_count > 0:
+        log_notification_event(f"啟動時重試了 {retry_count} 條緊急通知，成功 {success_count} 條")
 except Exception as e:
     print(f"[dual_notifier] 重試失敗通知時出錯: {e}")
 
